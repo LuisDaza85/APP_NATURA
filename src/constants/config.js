@@ -1,13 +1,7 @@
 // src/constants/config.js
 // Configuración general de la aplicación
 
-// URL del backend - CAMBIAR LA IP EN DESARROLLO
-export const API_BASE_URL = 'http://177.222.102.153:3001/api';  // IP especial para emulador Android
-  
-// Alternativas de IP para desarrollo:
-// - 'http://192.168.0.7:3001/api'     → Emulador Android Studio
-// - 'http://localhost:3001/api'    → iOS Simulator
-// - 'http://192.168.X.X:3001/api'  → Dispositivo físico (tu IP local)
+export const API_BASE_URL = 'https://naturapiscis-backend-production.up.railway.app/api';
 
 // Configuración de Firebase (para sensores en tiempo real)
 export const FIREBASE_CONFIG = {
