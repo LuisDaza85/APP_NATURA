@@ -13,6 +13,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../../constants/config';
 
 const POLLING_INTERVAL = 5000;
+const GOOGLE_MAPS_KEY = 'AIzaSyAHk2PMVr6HrM2iXeWplVeYpi25KlhjDXE';
 
 const ESTADOS = [
   { key: 'pendiente',          label: 'Pedido recibido',    icono: 'receipt-outline' },
@@ -24,6 +25,48 @@ const ESTADOS = [
 ];
 const ESTADO_INDEX = Object.fromEntries(ESTADOS.map((e, i) => [e.key, i]));
 
+// ✅ Decodificar polyline de Google
+const decodePolyline = (encoded) => {
+  const poly = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let b, shift = 0, result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+    shift = 0; result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+    poly.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+  }
+  return poly;
+};
+
+// ✅ Obtener ruta real de Google Directions API
+const fetchRutaReal = async (origen, destino) => {
+  try {
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origen.latitude},${origen.longitude}&destination=${destino.latitude},${destino.longitude}&mode=driving&key=${GOOGLE_MAPS_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status === 'OK' && data.routes.length > 0) {
+      const points = data.routes[0].overview_polyline.points;
+      return decodePolyline(points);
+    }
+  } catch (e) {
+    console.error('Error fetching ruta:', e.message);
+  }
+  return null;
+};
+
 const TrackingPedidoScreen = ({ route, navigation }) => {
   const { pedidoId } = route.params;
   const { colors } = useTheme();
@@ -31,11 +74,13 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
 
   const [pedido, setPedido] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [vistaActual, setVistaActual] = useState('detalles'); // 'mapa' | 'detalles'
+  const [vistaActual, setVistaActual] = useState('detalles');
+  const [rutaCoords, setRutaCoords] = useState([]); // ✅ Ruta real
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pollingRef = useRef(null);
   const mapRef = useRef(null);
+  const rutaCargadaRef = useRef(false);
 
   const fetchTracking = useCallback(async (silencioso = false) => {
     if (!silencioso) setLoading(true);
@@ -45,7 +90,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
       });
       setPedido(res.data);
 
-      // Centrar mapa en el conductor si se mueve
       if (res.data.conductor_lat && res.data.conductor_lng && mapRef.current && vistaActual === 'mapa') {
         mapRef.current.animateToRegion({
           latitude: parseFloat(res.data.conductor_lat),
@@ -60,6 +104,43 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
       setLoading(false);
     }
   }, [pedidoId, token, vistaActual]);
+
+  // ✅ Cargar ruta real cuando hay datos del conductor y destino
+  useEffect(() => {
+    if (!pedido || rutaCargadaRef.current) return;
+    
+    const origen = pedido.conductor_lat && pedido.conductor_lng
+      ? { latitude: parseFloat(pedido.conductor_lat), longitude: parseFloat(pedido.conductor_lng) }
+      : pedido.productor_lat && pedido.productor_lng
+        ? { latitude: parseFloat(pedido.productor_lat), longitude: parseFloat(pedido.productor_lng) }
+        : null;
+
+    const destino = pedido.consumidor_lat && pedido.consumidor_lng
+      ? { latitude: parseFloat(pedido.consumidor_lat), longitude: parseFloat(pedido.consumidor_lng) }
+      : null;
+
+    if (origen && destino) {
+      rutaCargadaRef.current = true;
+      fetchRutaReal(origen, destino).then(coords => {
+        if (coords && coords.length > 0) {
+          setRutaCoords(coords);
+        }
+      });
+    }
+  }, [pedido]);
+
+  // ✅ Actualizar ruta cuando el conductor se mueve
+  useEffect(() => {
+    if (!pedido?.conductor_lat || !pedido?.conductor_lng || pedido.estado !== 'en_camino') return;
+    const destino = pedido.consumidor_lat && pedido.consumidor_lng
+      ? { latitude: parseFloat(pedido.consumidor_lat), longitude: parseFloat(pedido.consumidor_lng) }
+      : null;
+    if (!destino) return;
+    const origen = { latitude: parseFloat(pedido.conductor_lat), longitude: parseFloat(pedido.conductor_lng) };
+    fetchRutaReal(origen, destino).then(coords => {
+      if (coords && coords.length > 0) setRutaCoords(coords);
+    });
+  }, [pedido?.conductor_lat, pedido?.conductor_lng]);
 
   useEffect(() => {
     fetchTracking();
@@ -86,14 +167,16 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
     }
   }, [pedido?.estado]);
 
-  // Cuando entra a vista mapa, ir donde está el conductor
   useEffect(() => {
     if (vistaActual === 'mapa' && pedido?.conductor_lat && mapRef.current) {
       setTimeout(() => {
-        mapRef.current?.fitToCoordinates(
-          getMapPoints(),
-          { edgePadding: { top: 80, right: 60, bottom: 200, left: 60 }, animated: true }
-        );
+        const pts = getMapPoints();
+        if (pts.length > 0) {
+          mapRef.current?.fitToCoordinates(pts, {
+            edgePadding: { top: 80, right: 60, bottom: 200, left: 60 },
+            animated: true,
+          });
+        }
       }, 500);
     }
   }, [vistaActual]);
@@ -153,11 +236,11 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
               tieneGPS ? {
                 latitude: parseFloat(pedido.conductor_lat),
                 longitude: parseFloat(pedido.conductor_lng),
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
+                latitudeDelta: 0.5,
+                longitudeDelta: 0.5,
               } : {
-                latitude: -17.3895, longitude: -66.1568, // Cochabamba por defecto
-                latitudeDelta: 0.05, longitudeDelta: 0.05,
+                latitude: -17.3895, longitude: -66.1568,
+                latitudeDelta: 0.5, longitudeDelta: 0.5,
               }
             }
           >
@@ -209,12 +292,21 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
               </Marker>
             )}
 
-            {/* Línea de ruta */}
-            {getMapPoints().length >= 2 && (
+            {/* ✅ Ruta real por carretera */}
+            {rutaCoords.length > 0 && (
+              <Polyline
+                coordinates={rutaCoords}
+                strokeColor="#3B82F6"
+                strokeWidth={4}
+              />
+            )}
+
+            {/* Fallback — línea recta si no cargó la ruta real */}
+            {rutaCoords.length === 0 && getMapPoints().length >= 2 && (
               <Polyline
                 coordinates={getMapPoints()}
-                strokeColor="#3B82F6"
-                strokeWidth={3}
+                strokeColor="#93C5FD"
+                strokeWidth={2}
                 lineDashPattern={[8, 4]}
               />
             )}
@@ -241,7 +333,7 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </SafeAreaView>
 
-          {/* Leyenda del mapa */}
+          {/* Leyenda */}
           <View style={styles.mapLeyenda}>
             <View style={styles.leyendaItem}>
               <View style={[styles.leyendaDot, { backgroundColor: '#22C55E' }]} />
@@ -285,19 +377,14 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
       {/* ══════════ VISTA DETALLES ══════════ */}
       {vistaActual === 'detalles' && (
         <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-          {/* Header */}
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 12 }}>
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Seguimiento del pedido</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {/* Botón mapa — solo cuando está en camino y tiene GPS */}
               {enCamino && tieneGPS && (
-                <TouchableOpacity
-                  style={styles.mapChip}
-                  onPress={() => setVistaActual('mapa')}
-                >
+                <TouchableOpacity style={styles.mapChip} onPress={() => setVistaActual('mapa')}>
                   <Ionicons name="map" size={14} color="#fff" />
                   <Text style={styles.mapChipText}>Ver mapa</Text>
                 </TouchableOpacity>
@@ -312,8 +399,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
           </View>
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-            {/* Código */}
             <View style={[styles.codigoCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
@@ -327,7 +412,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
               </Text>
             </View>
 
-            {/* Estado actual */}
             {esCancelado ? (
               <View style={[styles.estadoCard, { backgroundColor: '#FEF2F2', borderColor: '#EF4444' }]}>
                 <Ionicons name="close-circle" size={32} color="#EF4444" />
@@ -346,12 +430,8 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
                     Recogido: {formatFecha(pedido.fecha_recogida)}
                   </Text>
                 )}
-                {/* Mini mapa preview cuando está en camino */}
                 {enCamino && tieneGPS && (
-                  <TouchableOpacity
-                    style={styles.miniMapBtn}
-                    onPress={() => setVistaActual('mapa')}
-                  >
+                  <TouchableOpacity style={styles.miniMapBtn} onPress={() => setVistaActual('mapa')}>
                     <Ionicons name="map-outline" size={16} color="#3B82F6" />
                     <Text style={styles.miniMapText}>Ver conductor en el mapa →</Text>
                   </TouchableOpacity>
@@ -359,7 +439,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
               </View>
             )}
 
-            {/* Timeline */}
             {!esCancelado && (
               <View style={[styles.timelineCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Progreso del pedido</Text>
@@ -394,7 +473,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
               </View>
             )}
 
-            {/* Conductor */}
             {pedido?.repartidor_nombre && (
               <View style={[styles.conductorCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Tu conductor</Text>
@@ -412,7 +490,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
               </View>
             )}
 
-            {/* Entregado */}
             {pedido?.estado === 'entregado' && (
               <View style={[styles.entregadoBanner, { backgroundColor: '#F0FDF4' }]}>
                 <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
@@ -439,8 +516,6 @@ const TrackingPedidoScreen = ({ route, navigation }) => {
 
 const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-  // Mapa
   mapTopBar: {
     position: 'absolute', top: 0, left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -480,28 +555,21 @@ const styles = StyleSheet.create({
     padding: 8, borderRadius: 8, marginTop: 12,
   },
   actualizandoText: { fontSize: 12 },
-
-  // Marcadores
   markerProductor: {
     width: 40, height: 40, borderRadius: 20, backgroundColor: '#22C55E',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 3, borderColor: '#fff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 6,
+    borderWidth: 3, borderColor: '#fff', elevation: 6,
   },
   markerConductor: {
     width: 46, height: 46, borderRadius: 23, backgroundColor: '#3B82F6',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 3, borderColor: '#fff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 6,
+    borderWidth: 3, borderColor: '#fff', elevation: 6,
   },
   markerConsumidor: {
     width: 40, height: 40, borderRadius: 20, backgroundColor: '#EF4444',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 3, borderColor: '#fff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 6,
+    borderWidth: 3, borderColor: '#fff', elevation: 6,
   },
-
-  // Detalles
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1,
@@ -515,12 +583,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#3B82F6', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20,
   },
   mapChipText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-
   scrollContent: { padding: 16, gap: 14, paddingBottom: 40 },
-
   codigoCard: { borderRadius: 14, borderWidth: 1, padding: 16, alignItems: 'center', gap: 6 },
   codigoCodigo: { fontSize: 28, fontWeight: '700', letterSpacing: 3 },
-
   estadoCard: { borderRadius: 14, borderWidth: 2, padding: 20, alignItems: 'center', gap: 8 },
   estadoCardTitle: { fontSize: 20, fontWeight: '700' },
   miniMapBtn: {
@@ -528,7 +593,6 @@ const styles = StyleSheet.create({
     marginTop: 4, padding: 8, borderRadius: 8, backgroundColor: '#EFF6FF',
   },
   miniMapText: { fontSize: 14, color: '#3B82F6', fontWeight: '500' },
-
   timelineCard: { borderRadius: 14, borderWidth: 1, padding: 16, gap: 4 },
   sectionTitle: { fontSize: 15, fontWeight: '600', marginBottom: 12 },
   timelineItem: {
@@ -541,13 +605,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     marginRight: 14, marginTop: 2,
   },
-
   conductorCard: { borderRadius: 14, borderWidth: 1, padding: 16 },
   conductorRow: { flexDirection: 'row', alignItems: 'center' },
   conductorAvatar: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
   conductorNombre: { fontSize: 16, fontWeight: '600' },
   conductorSub: { fontSize: 13, marginTop: 2 },
-
   entregadoBanner: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', gap: 8, padding: 12, borderRadius: 10,
