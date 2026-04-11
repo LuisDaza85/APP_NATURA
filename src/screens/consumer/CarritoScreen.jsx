@@ -25,6 +25,14 @@ if (!isExpoGo) {
 
 const { width } = Dimensions.get('window');
 
+// Opciones de preferencia de corte
+const PREFERENCIAS = [
+  { key: 'sin_preferencia', label: 'Sin preferencia', icon: '🐟' },
+  { key: 'pasilla',         label: 'Pasilla',          icon: '🍟', hint: 'Peces pequeños 300-500g' },
+  { key: 'tostar',          label: 'Para tostar',       icon: '🔥', hint: 'Peces medianos 500-800g' },
+  { key: 'entero',          label: 'Entero grande',     icon: '🍽️', hint: 'Peces grandes 1kg+' },
+];
+
 const CarritoScreen = ({ navigation }) => {
   const { colors } = useTheme();
 
@@ -36,6 +44,8 @@ const CarritoScreen = ({ navigation }) => {
   const [paradaSeleccionada, setParadaSeleccionada] = useState(null);
   const [metodoPago, setMetodoPago] = useState('efectivo');
   const [procesando, setProcesando] = useState(false);
+  // ✅ preferencias por item { [carritoItemId]: 'pasilla' | 'tostar' | ... }
+  const [preferencias, setPreferencias] = useState({});
 
   useEffect(() => {
     fetchCarrito();
@@ -98,6 +108,7 @@ const CarritoScreen = ({ navigation }) => {
           try {
             await api.delete(`/carrito/${id}`);
             setCarrito(prev => prev.filter(item => item.id !== id));
+            setPreferencias(prev => { const n = { ...prev }; delete n[id]; return n; });
           } catch (error) {
             Alert.alert('Error', 'No se pudo eliminar el producto');
           }
@@ -118,7 +129,6 @@ const CarritoScreen = ({ navigation }) => {
       return;
     }
 
-    // Mapear método de pago a su ID en la BD
     const metodoPagoIds = { efectivo: 4, qr: 7, transferencia: 8 };
     const metodoPagoId = metodoPagoIds[metodoPago] || 4;
 
@@ -127,8 +137,9 @@ const CarritoScreen = ({ navigation }) => {
         producto_id: item.producto_id || item.id,
         cantidad: item.cantidad,
         precio: parseFloat(item.precio),
+        preferencia_corte: preferencias[item.id] || 'sin_preferencia',
       })),
-      direccion_id: 15, // dirección predeterminada del consumidor
+      direccion_id: 15,
       metodo_pago_id: metodoPagoId,
       metodo_envio: 'parada',
       subtotal,
@@ -185,6 +196,37 @@ const CarritoScreen = ({ navigation }) => {
     </View>
   );
 
+  // ✅ Selector de preferencia de corte por item
+  const renderPreferenciaSelector = (item) => {
+    const seleccionada = preferencias[item.id] || 'sin_preferencia';
+    return (
+      <View style={styles.preferenciaContainer}>
+        <Text style={[styles.preferenciaLabel, { color: colors.textSecondary }]}>¿Para qué ocasión?</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.preferenciaScroll}>
+          {PREFERENCIAS.map((pref) => {
+            const activo = seleccionada === pref.key;
+            return (
+              <TouchableOpacity
+                key={pref.key}
+                style={[
+                  styles.preferenciaBtn,
+                  { borderColor: activo ? colors.primary : colors.border, backgroundColor: activo ? colors.primary + '15' : colors.surfaceVariant }
+                ]}
+                onPress={() => setPreferencias(prev => ({ ...prev, [item.id]: pref.key }))}
+              >
+                <Text style={styles.preferenciaIcon}>{pref.icon}</Text>
+                <Text style={[styles.preferenciaBtnText, { color: activo ? colors.primary : colors.text }]}>{pref.label}</Text>
+                {pref.hint && activo && (
+                  <Text style={[styles.preferenciaHint, { color: colors.textSecondary }]}>{pref.hint}</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
+
   const renderCarrito = () => (
     <View style={styles.stepContent}>
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Mi Carrito</Text>
@@ -203,30 +245,34 @@ const CarritoScreen = ({ navigation }) => {
         <>
           {safeCarrito.map((item) => (
             <View key={item.id} style={[styles.cartItem, { backgroundColor: colors.surface }]}>
-              <View style={[styles.cartItemImage, { backgroundColor: colors.surfaceVariant }]}>
-                {item.imagen_url
-                  ? <Image source={{ uri: item.imagen_url }} style={styles.itemImg} />
-                  : <Ionicons name="fish-outline" size={30} color={colors.textMuted} />
-                }
-              </View>
-              <View style={styles.cartItemInfo}>
-                <Text style={[styles.cartItemName, { color: colors.text }]} numberOfLines={1}>{item.nombre}</Text>
-                <Text style={[styles.cartItemPrice, { color: colors.textSecondary }]}>Bs {parseFloat(item.precio).toFixed(2)}</Text>
-              </View>
-              <View style={styles.cartItemActions}>
-                <View style={[styles.quantityControl, { backgroundColor: colors.surfaceVariant }]}>
-                  <TouchableOpacity onPress={() => updateQuantity(item.id, item.cantidad - 1)}>
-                    <Ionicons name="remove" size={18} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={[styles.quantityText, { color: colors.text }]}>{item.cantidad}</Text>
-                  <TouchableOpacity onPress={() => updateQuantity(item.id, item.cantidad + 1)}>
-                    <Ionicons name="add" size={18} color={colors.text} />
+              <View style={styles.cartItemTop}>
+                <View style={[styles.cartItemImage, { backgroundColor: colors.surfaceVariant }]}>
+                  {item.imagen_url
+                    ? <Image source={{ uri: item.imagen_url }} style={styles.itemImg} />
+                    : <Ionicons name="fish-outline" size={30} color={colors.textMuted} />
+                  }
+                </View>
+                <View style={styles.cartItemInfo}>
+                  <Text style={[styles.cartItemName, { color: colors.text }]} numberOfLines={1}>{item.nombre}</Text>
+                  <Text style={[styles.cartItemPrice, { color: colors.textSecondary }]}>Bs {parseFloat(item.precio).toFixed(2)} / kg</Text>
+                </View>
+                <View style={styles.cartItemActions}>
+                  <View style={[styles.quantityControl, { backgroundColor: colors.surfaceVariant }]}>
+                    <TouchableOpacity onPress={() => updateQuantity(item.id, item.cantidad - 1)}>
+                      <Ionicons name="remove" size={18} color={colors.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.quantityText, { color: colors.text }]}>{item.cantidad} kg</Text>
+                    <TouchableOpacity onPress={() => updateQuantity(item.id, item.cantidad + 1)}>
+                      <Ionicons name="add" size={18} color={colors.text} />
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity onPress={() => removeItem(item.id)}>
+                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={() => removeItem(item.id)}>
-                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                </TouchableOpacity>
               </View>
+              {/* ✅ Selector de preferencia */}
+              {renderPreferenciaSelector(item)}
             </View>
           ))}
           <View style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
@@ -266,7 +312,6 @@ const CarritoScreen = ({ navigation }) => {
           Elige la parada donde recibirás tu pedido
         </Text>
 
-        {/* ✅ Mapa solo en build nativo, placeholder en Expo Go */}
         {MapView !== null ? (
           <View style={styles.mapContainer}>
             <MapView style={styles.map} provider={PROVIDER_GOOGLE} initialRegion={initialRegion}>
@@ -337,6 +382,22 @@ const CarritoScreen = ({ navigation }) => {
           <TouchableOpacity onPress={() => setStep(2)}>
             <Text style={{ fontSize: 12, color: colors.primary }}>Cambiar</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ✅ Resumen de preferencias seleccionadas */}
+      {safeCarrito.some(item => preferencias[item.id] && preferencias[item.id] !== 'sin_preferencia') && (
+        <View style={[styles.preferenciasResumen, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.preferenciasResumenTitle, { color: colors.text }]}>Preferencias de corte:</Text>
+          {safeCarrito.map(item => {
+            const pref = PREFERENCIAS.find(p => p.key === (preferencias[item.id] || 'sin_preferencia'));
+            if (!pref || pref.key === 'sin_preferencia') return null;
+            return (
+              <Text key={item.id} style={[styles.preferenciasResumenItem, { color: colors.textSecondary }]}>
+                {pref.icon} {item.nombre}: {pref.label}
+              </Text>
+            );
+          })}
         </View>
       )}
 
@@ -461,15 +522,27 @@ const styles = StyleSheet.create({
   emptySubtitle: { fontSize: 14, marginTop: 8, marginBottom: 20 },
   emptyButton: { backgroundColor: '#3B82F6', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
   emptyButtonText: { color: '#FFF', fontWeight: '600', fontSize: 15 },
-  cartItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, marginBottom: 10 },
+  cartItem: { borderRadius: 12, marginBottom: 12, padding: 12 },
+  cartItemTop: { flexDirection: 'row', alignItems: 'center' },
   cartItemImage: { width: 60, height: 60, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   itemImg: { width: '100%', height: '100%', borderRadius: 10 },
   cartItemInfo: { flex: 1 },
   cartItemName: { fontSize: 15, fontWeight: '600', marginBottom: 4 },
   cartItemPrice: { fontSize: 14 },
   cartItemActions: { alignItems: 'flex-end', gap: 8 },
-  quantityControl: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, gap: 12 },
-  quantityText: { fontSize: 15, fontWeight: '600', minWidth: 20, textAlign: 'center' },
+  quantityControl: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, gap: 8 },
+  quantityText: { fontSize: 14, fontWeight: '600', minWidth: 32, textAlign: 'center' },
+  // Preferencia styles
+  preferenciaContainer: { marginTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 10 },
+  preferenciaLabel: { fontSize: 12, marginBottom: 8 },
+  preferenciaScroll: { flexDirection: 'row' },
+  preferenciaBtn: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8, alignItems: 'center', minWidth: 80 },
+  preferenciaIcon: { fontSize: 18 },
+  preferenciaBtnText: { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  preferenciaHint: { fontSize: 10, marginTop: 2, textAlign: 'center' },
+  preferenciasResumen: { borderRadius: 12, padding: 12, marginBottom: 12 },
+  preferenciasResumenTitle: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  preferenciasResumenItem: { fontSize: 13, marginBottom: 4 },
   summaryCard: { borderRadius: 12, padding: 16, marginTop: 16 },
   summaryTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
