@@ -15,13 +15,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
 import { useAuth } from '../../contexts/AuthContext';
+import api from '../../api/axios.config';
 import { useTheme } from '../../contexts/ThemeContext';
 import { SPACING, BORDER_RADIUS } from '../../constants/theme';
 
 const ProfileScreen = () => {
   const { user, logout } = useAuth();
   const { colors, isDarkMode, themeMode, setTheme, THEME_MODES, isAuto } = useTheme();
+  const [guardandoUbicacion, setGuardandoUbicacion] = useState(false);
+  const [ubicacionGuardada, setUbicacionGuardada] = useState(false);
 
   // ============================================
   // CAMBIAR TEMA
@@ -50,6 +54,37 @@ const ProfileScreen = () => {
         },
       ]
     );
+  };
+
+  // ============================================
+  // GUARDAR UBICACIÓN DEL ESTANQUE
+  // ============================================
+  const handleGuardarUbicacion = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setGuardandoUbicacion(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu ubicación para guardar la posición del estanque.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      await api.post('/repartidor/ubicacion-productor', {
+        lat: loc.coords.latitude,
+        lng: loc.coords.longitude,
+      });
+      setUbicacionGuardada(true);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        '✅ Ubicación guardada',
+        `Estanque registrado en:\nLat: ${loc.coords.latitude.toFixed(6)}\nLng: ${loc.coords.longitude.toFixed(6)}`
+      );
+      setTimeout(() => setUbicacionGuardada(false), 3000);
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo guardar la ubicación. Intenta nuevamente.');
+    } finally {
+      setGuardandoUbicacion(false);
+    }
   };
 
   // Estilos dinámicos
@@ -210,6 +245,41 @@ const ProfileScreen = () => {
               Tema actual: {isDarkMode ? 'Oscuro' : 'Claro'}
               {isAuto ? ' (Auto)' : ''}
             </Text>
+          </View>
+        </View>
+
+        {/* Sección: Estanque */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, dynamicStyles.textSecondary]}>
+            ESTANQUE
+          </Text>
+          <View style={[styles.card, dynamicStyles.card]}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={handleGuardarUbicacion}
+              disabled={guardandoUbicacion}
+            >
+              <View style={styles.menuItemLeft}>
+                <View style={[styles.themeIconContainer, { backgroundColor: ubicacionGuardada ? '#dcfce7' : '#e0f2fe' }]}>
+                  <Ionicons
+                    name={ubicacionGuardada ? 'checkmark-circle' : guardandoUbicacion ? 'hourglass-outline' : 'location'}
+                    size={20}
+                    color={ubicacionGuardada ? '#22c55e' : '#0284c7'}
+                  />
+                </View>
+                <View>
+                  <Text style={[styles.menuItemText, dynamicStyles.text]}>
+                    {guardandoUbicacion ? 'Obteniendo ubicación...' : 'Actualizar ubicación del estanque'}
+                  </Text>
+                  <Text style={[styles.themeOptionDesc, dynamicStyles.textSecondary]}>
+                    {ubicacionGuardada ? '¡Guardada correctamente!' : 'Requerido para el tracking de pedidos'}
+                  </Text>
+                </View>
+              </View>
+              {!guardandoUbicacion && (
+                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 

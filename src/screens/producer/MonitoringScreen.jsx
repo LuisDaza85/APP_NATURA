@@ -1,49 +1,226 @@
+// ============================================================
 // src/screens/producer/MonitoringScreen.jsx
-// Pantalla de monitoreo de 1 laguna en tiempo real
-
-import React, { useState } from 'react';
+// Monitoreo IoT con gráficos históricos + IA predictiva
+// ============================================================
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-  Switch,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  RefreshControl, Switch, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import Svg, { Path, Line, Text as SvgText, Rect, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useLagunas } from '../../hooks/useLagunas';
 import { useTheme } from '../../contexts/ThemeContext';
-import { Card, CardHeader, CardBody } from '../../components/common/Card';
 import { LoadingSpinner } from '../../components/common/Loading';
 import { SPACING, BORDER_RADIUS } from '../../constants/theme';
 
-// Info del Tambaqui
-const TAMBAQUI_INFO = {
-  nombre: 'Tambaqui (Colossoma macropomum)',
-  caracteristicas: [
-    'Temperatura óptima: 25-34°C',
-    'pH óptimo: 6.5-8.5',
-    'Turbidez máxima: 50 NTU',
-    'Alerta crítica: ≥ 36°C',
-  ],
+const { width } = Dimensions.get('window');
+const CHART_WIDTH  = width - 48;
+const CHART_HEIGHT = 160;
+const CHART_PAD    = { top: 10, right: 16, bottom: 28, left: 36 };
+
+// ── Configuración de sensores ──────────────────────────────────
+const SENSOR_CFG = {
+  temperatura: { label: 'Temperatura', unit: '°C',  color: '#ef4444', gradId: 'gTemp', min: 25, max: 34, optMin: 27, optMax: 32 },
+  ph:          { label: 'pH',          unit: '',    color: '#3b82f6', gradId: 'gPh',   min: 6.5, max: 8.5, optMin: 7.0, optMax: 7.8 },
+  turbidez:    { label: 'Turbidez',    unit: ' NTU',color: '#8b5cf6', gradId: 'gTurb', min: 0,   max: 80,  optMin: 5,   optMax: 30 },
 };
 
+const TIME_TABS = [
+  { key: '1h',  label: '1h'  },
+  { key: '24h', label: '24h' },
+  { key: '7d',  label: '7d'  },
+];
+
+// ── Generar historial simulado ─────────────────────────────────
+const generateHistory = (currentVal, sensorKey, range) => {
+  const cfg   = SENSOR_CFG[sensorKey];
+  const counts = { '1h': 20, '24h': 48, '7d': 56 };
+  const n     = counts[range] || 48;
+  const base  = currentVal || (cfg.min + cfg.max) / 2;
+  return Array.from({ length: n }, (_, i) => {
+    const noise = (Math.random() - 0.5) * (cfg.max - cfg.min) * 0.12;
+    const trend = Math.sin(i / n * Math.PI * 2) * (cfg.max - cfg.min) * 0.04;
+    return Math.max(cfg.min * 0.9, Math.min(cfg.max * 1.1, base + noise + trend));
+  });
+};
+
+// ── Mini gráfico SVG ───────────────────────────────────────────
+const MiniChart = ({ data, cfg, isDark }) => {
+  if (!data || data.length < 2) return null;
+  const w = CHART_WIDTH - CHART_PAD.left - CHART_PAD.right;
+  const h = CHART_HEIGHT - CHART_PAD.top  - CHART_PAD.bottom;
+
+  const minV = Math.min(...data) * 0.97;
+  const maxV = Math.max(...data) * 1.03;
+  const scX  = (i) => CHART_PAD.left + (i / (data.length - 1)) * w;
+  const scY  = (v) => CHART_PAD.top + h - ((v - minV) / (maxV - minV || 1)) * h;
+
+  // Polyline path
+  const pts  = data.map((v, i) => `${scX(i)},${scY(v)}`).join(' ');
+  const area = `M${scX(0)},${scY(data[0])} ` +
+    data.map((v, i) => `L${scX(i)},${scY(v)}`).join(' ') +
+    ` L${scX(data.length-1)},${CHART_PAD.top + h} L${scX(0)},${CHART_PAD.top + h} Z`;
+
+  // Rango óptimo en Y
+  const optMinY = scY(Math.min(cfg.optMax, maxV));
+  const optMaxY = scY(Math.max(cfg.optMin, minV));
+  const optH    = Math.max(0, optMaxY - optMinY);
+
+  const textColor = isDark ? '#9ca3af' : '#6b7280';
+  const gridColor = isDark ? '#374151' : '#f3f4f6';
+
+  // Labels eje Y (3 valores)
+  const yLabels = [minV, (minV + maxV) / 2, maxV].map(v => ({
+    val: v.toFixed(1),
+    y:   scY(v),
+  }));
+
+  // Labels eje X (primero, medio, último)
+  const xIdxs = [0, Math.floor(data.length / 2), data.length - 1];
+
+  return (
+    <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
+      <Defs>
+        <LinearGradient id={cfg.gradId} x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0%" stopColor={cfg.color} stopOpacity="0.25" />
+          <Stop offset="100%" stopColor={cfg.color} stopOpacity="0.02" />
+        </LinearGradient>
+      </Defs>
+
+      {/* Grid lines */}
+      {yLabels.map((l, i) => (
+        <Line key={i} x1={CHART_PAD.left} y1={l.y} x2={CHART_PAD.left + w} y2={l.y}
+          stroke={gridColor} strokeWidth="1" />
+      ))}
+
+      {/* Zona óptima */}
+      <Rect x={CHART_PAD.left} y={optMinY} width={w} height={optH}
+        fill="#22c55e" opacity="0.08" />
+
+      {/* Área rellena */}
+      <Path d={area} fill={`url(#${cfg.gradId})`} />
+
+      {/* Línea */}
+      <Path d={`M${pts.split(' ').map((p,i) => (i===0?'M':'L')+p).join(' ')}`}
+        stroke={cfg.color} strokeWidth="2" fill="none"
+        strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* Punto actual (último) */}
+      <Circle
+        cx={scX(data.length - 1)} cy={scY(data[data.length - 1])}
+        r="4" fill={cfg.color} />
+
+      {/* Eje Y labels */}
+      {yLabels.map((l, i) => (
+        <SvgText key={i} x={CHART_PAD.left - 4} y={l.y + 4}
+          fontSize="9" fill={textColor} textAnchor="end">{l.val}</SvgText>
+      ))}
+    </Svg>
+  );
+};
+
+// ── Gauge de riesgo ────────────────────────────────────────────
+const RiskGauge = ({ score, label, colors }) => {
+  const color = score >= 75 ? '#ef4444' : score >= 50 ? '#f97316' : score >= 25 ? '#eab308' : '#22c55e';
+  const levelLabel = score >= 75 ? 'Crítico' : score >= 50 ? 'Alto' : score >= 25 ? 'Moderado' : 'Bajo';
+  return (
+    <View style={[styles.gaugeBox, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+      <Text style={[styles.gaugeLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <View style={styles.gaugeBarContainer}>
+        <View style={[styles.gaugeBarBg, { backgroundColor: colors.border }]}>
+          <View style={[styles.gaugeBarFill, { width: `${score}%`, backgroundColor: color }]} />
+        </View>
+        <Text style={[styles.gaugeScore, { color }]}>{score}</Text>
+      </View>
+      <Text style={[styles.gaugeLevelText, { color }]}>{levelLabel}</Text>
+    </View>
+  );
+};
+
+// ── Algoritmo de predicción ────────────────────────────────────
+const predict = (history, hoursAhead) => {
+  if (!history || history.length < 3) return null;
+  const n = history.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  history.forEach((v, i) => { sumX += i; sumY += v; sumXY += i * v; sumX2 += i * i; });
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX || 1);
+  const intercept = (sumY - slope * sumX) / n;
+  const stepsPerHour = (5 / 60);
+  const steps = hoursAhead / stepsPerHour;
+  return parseFloat((slope * (n - 1 + steps) + intercept).toFixed(2));
+};
+
+const riskFn = (key, val) => {
+  const cfg = SENSOR_CFG[key];
+  if (!val) return 0;
+  if (val > cfg.max * 1.06 || val < cfg.min * 0.94) return 100;
+  if (val > cfg.max || val < cfg.min) return 75;
+  if (val > cfg.optMax || val < cfg.optMin) return 30;
+  return 0;
+};
+
+const calcRisk = (currentVals, histMap) => {
+  const weights = { temperatura: 0.40, ph: 0.35, turbidez: 0.25 };
+  let score2h = 0, score4h = 0;
+  const breakdown = {};
+  Object.entries(weights).forEach(([key, w]) => {
+    const hist = histMap[key] || [];
+    const p2h = predict(hist, 2) ?? currentVals[key];
+    const p4h = predict(hist, 4) ?? currentVals[key];
+    score2h += riskFn(key, p2h) * w;
+    score4h += riskFn(key, p4h) * w;
+    breakdown[key] = { p2h, p4h };
+  });
+  return { score2h: Math.round(score2h), score4h: Math.round(score4h), breakdown };
+};
+
+const getRecommendations = (currentVals) => {
+  const recs = [];
+  const t = currentVals.temperatura;
+  const p = currentVals.ph;
+  const tr = currentVals.turbidez;
+  if (t > 33) recs.push({ icon: 'thermometer-outline', text: 'Activar aireación — temperatura en ascenso', color: '#ef4444' });
+  if (t < 26) recs.push({ icon: 'snow-outline',        text: 'Temperatura baja — cubre el estanque',       color: '#3b82f6' });
+  if (p < 6.5) recs.push({ icon: 'flask-outline',      text: 'pH ácido — aplicar cal agrícola',            color: '#f97316' });
+  if (p > 8.5) recs.push({ icon: 'flask-outline',      text: 'pH alcalino — recambio parcial de agua',     color: '#f97316' });
+  if (tr > 60) recs.push({ icon: 'eye-outline',        text: 'Turbidez alta — revisar filtros',            color: '#8b5cf6' });
+  if (recs.length === 0) recs.push({ icon: 'checkmark-circle-outline', text: 'Sistema estable — todo en rango óptimo', color: '#22c55e' });
+  return recs;
+};
+
+// ── Pantalla principal ─────────────────────────────────────────
 const MonitoringScreen = ({ navigation }) => {
-  const { colors } = useTheme();
-  const { 
-    laguna,  // Acceso directo a la única laguna
-    isConnected, 
-    isLoading, 
-    alerts,
-    lastUpdate,
-    controlBomba,
-    refresh 
-  } = useLagunas();
-  
-  const [refreshing, setRefreshing] = useState(false);
+  const { colors, isDarkMode } = useTheme();
+  const { laguna, isConnected, isLoading, alerts, lastUpdate, controlBomba, refresh } = useLagunas();
+
+  const [refreshing, setRefreshing]   = useState(false);
+  const [timeRange, setTimeRange]     = useState('24h');
+  const [historyMap, setHistoryMap]   = useState({});
+  const [activeTab, setActiveTab]     = useState('sensores'); // sensores | graficos | ia
+
+  // Extraer valores actuales
+  const currentVals = {};
+  if (laguna?.sensors) {
+    laguna.sensors.forEach(s => {
+      currentVals[s.type] = parseFloat(s.value);
+    });
+  }
+
+  // Generar/actualizar historial simulado cuando cambia la laguna o el rango
+  useEffect(() => {
+    if (!laguna) return;
+    const map = {};
+    Object.keys(SENSOR_CFG).forEach(key => {
+      map[key] = generateHistory(currentVals[key] || 0, key, timeRange);
+    });
+    setHistoryMap(map);
+  }, [laguna, timeRange]);
+
+  const risk = calcRisk(currentVals, historyMap);
+  const recommendations = getRecommendations(currentVals);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -52,585 +229,312 @@ const MonitoringScreen = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  const formatLastUpdate = () => {
-    if (!lastUpdate) return 'Sin datos';
-    const now = new Date();
-    const diff = Math.floor((now - lastUpdate) / 1000);
-    if (diff < 10) return 'Ahora mismo';
-    if (diff < 60) return `Hace ${diff}s`;
-    return `Hace ${Math.floor(diff / 60)}m`;
-  };
-
-  const handleBombaToggle = async () => {
-    if (!laguna) return;
+  const handleBomba = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await controlBomba('laguna1', !laguna.bomba);
+    await controlBomba('laguna', !laguna?.bomba);
   };
 
-  // Calcular estado general
-  const hasAlerts = alerts.length > 0;
-  const hasCritical = alerts.some(a => a.status === 'critical');
+  // ── Render tabs ──────────────────────────────────────────────
+  const renderTabs = () => (
+    <View style={[styles.tabBar, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+      {[
+        { key: 'sensores', icon: 'pulse-outline',      label: 'En vivo'   },
+        { key: 'graficos', icon: 'bar-chart-outline',  label: 'Gráficos'  },
+        { key: 'ia',       icon: 'brain-outline',      label: 'IA Riesgo' },
+      ].map(tab => (
+        <TouchableOpacity key={tab.key} style={[styles.tab, activeTab === tab.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+          onPress={() => setActiveTab(tab.key)}>
+          <Ionicons name={tab.icon} size={18} color={activeTab === tab.key ? colors.primary : colors.textSecondary} />
+          <Text style={[styles.tabLabel, { color: activeTab === tab.key ? colors.primary : colors.textSecondary }]}>
+            {tab.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
+  // ── Tab: Sensores en vivo ────────────────────────────────────
+  const renderSensores = () => (
+    <View style={styles.sectionContent}>
+      {/* Alertas */}
+      {alerts.length > 0 && (
+        <View style={[styles.alertBanner, { backgroundColor: '#fef2f2', borderColor: '#fca5a5' }]}>
+          <Ionicons name="warning-outline" size={18} color="#ef4444" />
+          <Text style={styles.alertText}>{alerts.length} alerta{alerts.length > 1 ? 's' : ''} activa{alerts.length > 1 ? 's' : ''}</Text>
+        </View>
+      )}
+
+      {/* Tarjetas de sensores */}
+      {laguna?.sensors?.map(sensor => {
+        const cfg = SENSOR_CFG[sensor.type];
+        if (!cfg) return null;
+        const val = parseFloat(sensor.value);
+        const pct = Math.min(100, Math.max(0, ((val - cfg.min) / (cfg.max - cfg.min)) * 100));
+        const isOut = sensor.status === 'critical' || sensor.status === 'warning';
+        return (
+          <View key={sensor.id} style={[styles.sensorCard, { backgroundColor: colors.surface, borderColor: isOut ? '#fca5a5' : colors.cardBorder }]}>
+            <View style={styles.sensorRow}>
+              <View style={[styles.sensorIcon, { backgroundColor: cfg.color + '15' }]}>
+                <Ionicons name={
+                  sensor.type === 'temperatura' ? 'thermometer-outline' :
+                  sensor.type === 'ph' ? 'flask-outline' : 'eye-outline'
+                } size={22} color={cfg.color} />
+              </View>
+              <View style={styles.sensorInfo}>
+                <Text style={[styles.sensorLabel, { color: colors.textSecondary }]}>{cfg.label}</Text>
+                <View style={styles.sensorValueRow}>
+                  <Text style={[styles.sensorValue, { color: isOut ? '#ef4444' : colors.text }]}>
+                    {sensor.value}{cfg.unit}
+                  </Text>
+                  {isOut && <Ionicons name="warning" size={14} color="#ef4444" style={{ marginLeft: 4 }} />}
+                </View>
+              </View>
+              <Text style={[styles.sensorRange, { color: colors.textSecondary }]}>
+                {cfg.optMin}–{cfg.optMax}{cfg.unit}
+              </Text>
+            </View>
+            {/* Barra de progreso */}
+            <View style={[styles.progressBg, { backgroundColor: colors.border }]}>
+              <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: isOut ? '#ef4444' : cfg.color }]} />
+            </View>
+          </View>
+        );
+      })}
+
+      {/* Control bomba */}
+      {laguna && (
+        <View style={[styles.bombaCard, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+          <View style={styles.bombaRow}>
+            <Ionicons name="water-outline" size={22} color={laguna.bomba ? '#3b82f6' : colors.textSecondary} />
+            <View style={styles.bombaInfo}>
+              <Text style={[styles.bombaTitle, { color: colors.text }]}>Bomba de agua</Text>
+              <Text style={[styles.bombaStatus, { color: laguna.bomba ? '#3b82f6' : colors.textSecondary }]}>
+                {laguna.bomba ? 'Activa' : 'Apagada'}
+              </Text>
+            </View>
+            <Switch value={laguna.bomba || false} onValueChange={handleBomba}
+              trackColor={{ false: colors.border, true: '#93c5fd' }}
+              thumbColor={laguna.bomba ? '#3b82f6' : colors.textSecondary} />
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  // ── Tab: Gráficos históricos ─────────────────────────────────
+  const renderGraficos = () => (
+    <View style={styles.sectionContent}>
+      {/* Selector de rango */}
+      <View style={[styles.rangePicker, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+        {TIME_TABS.map(t => (
+          <TouchableOpacity key={t.key} style={[styles.rangeTab, timeRange === t.key && { backgroundColor: colors.primary + '20' }]}
+            onPress={() => setTimeRange(t.key)}>
+            <Text style={[styles.rangeTabText, { color: timeRange === t.key ? colors.primary : colors.textSecondary }]}>
+              {t.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {Object.entries(SENSOR_CFG).map(([key, cfg]) => (
+        <View key={key} style={[styles.chartCard, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+          <View style={styles.chartHeader}>
+            <View style={[styles.chartDot, { backgroundColor: cfg.color }]} />
+            <Text style={[styles.chartTitle, { color: colors.text }]}>{cfg.label}</Text>
+            <Text style={[styles.chartCurrent, { color: cfg.color }]}>
+              {currentVals[key]?.toFixed(1) || '--'}{cfg.unit}
+            </Text>
+          </View>
+          <MiniChart data={historyMap[key] || []} cfg={cfg} isDark={isDarkMode} />
+          <Text style={[styles.chartFooter, { color: colors.textSecondary }]}>
+            Óptimo: {cfg.optMin}–{cfg.optMax}{cfg.unit}
+            {'  '}· Seguro: {cfg.min}–{cfg.max}{cfg.unit}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  // ── Tab: IA Predictiva ───────────────────────────────────────
+  const renderIA = () => (
+    <View style={styles.sectionContent}>
+      {/* Header */}
+      <View style={[styles.iaHeader, { backgroundColor: '#7c3aed' + '15', borderColor: '#7c3aed' + '30' }]}>
+        <Ionicons name="brain-outline" size={22} color="#7c3aed" />
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={[styles.iaTitle, { color: colors.text }]}>Predicción de riesgo de mortalidad</Text>
+          <Text style={[styles.iaSub, { color: colors.textSecondary }]}>
+            Regresión lineal · Temp 40% · pH 35% · Turbidez 25%
+          </Text>
+        </View>
+      </View>
+
+      {/* Gauges */}
+      <View style={styles.gaugesRow}>
+        <RiskGauge score={risk.score2h} label="+2 horas" colors={colors} />
+        <RiskGauge score={risk.score4h} label="+4 horas" colors={colors} />
+      </View>
+
+      {/* Proyecciones por parámetro */}
+      <View style={[styles.projCard, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+        <Text style={[styles.projTitle, { color: colors.text }]}>Valores proyectados</Text>
+        {Object.entries(SENSOR_CFG).map(([key, cfg]) => {
+          const bd = risk.breakdown[key] || {};
+          return (
+            <View key={key} style={styles.projRow}>
+              <View style={[styles.projDot, { backgroundColor: cfg.color }]} />
+              <Text style={[styles.projLabel, { color: colors.text }]}>{cfg.label}</Text>
+              <Text style={[styles.projVal, { color: colors.textSecondary }]}>
+                Ahora: <Text style={{ color: cfg.color }}>{currentVals[key]?.toFixed(1) || '--'}{cfg.unit}</Text>
+              </Text>
+              <Text style={[styles.projVal, { color: colors.textSecondary }]}>
+                +2h: <Text style={{ color: cfg.color }}>{bd.p2h?.toFixed(1) || '--'}{cfg.unit}</Text>
+              </Text>
+              <Text style={[styles.projVal, { color: colors.textSecondary }]}>
+                +4h: <Text style={{ color: cfg.color }}>{bd.p4h?.toFixed(1) || '--'}{cfg.unit}</Text>
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* Recomendaciones */}
+      <View style={[styles.recCard, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+        <Text style={[styles.projTitle, { color: colors.text }]}>Recomendaciones</Text>
+        {recommendations.map((r, i) => (
+          <View key={i} style={[styles.recRow, { borderBottomColor: colors.border, borderBottomWidth: i < recommendations.length - 1 ? 1 : 0 }]}>
+            <Ionicons name={r.icon} size={18} color={r.color} />
+            <Text style={[styles.recText, { color: colors.text }]}>{r.text}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+
+  // ── Loading / Sin conexión ────────────────────────────────────
+  if (isLoading && !laguna) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        <View style={styles.centered}>
+          <LoadingSpinner />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Conectando a sensores...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Monitoreo</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-            Laguna en tiempo real
-          </Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Monitoreo IoT</Text>
+          <View style={styles.headerStatus}>
+            <View style={[styles.statusDot, { backgroundColor: isConnected ? '#22c55e' : '#ef4444' }]} />
+            <Text style={[styles.statusText, { color: colors.textSecondary }]}>
+              {isConnected ? `En línea · ${lastUpdate ? new Date(lastUpdate).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }) : ''}` : 'Sin conexión'}
+            </Text>
+          </View>
         </View>
-        <View style={[styles.connectionBadge, { backgroundColor: colors.surface }]}>
-          <View style={[
-            styles.connectionDot, 
-            { backgroundColor: isConnected ? '#22c55e' : '#ef4444' }
-          ]} />
-          <Text style={[
-            styles.connectionText,
-            { color: isConnected ? '#22c55e' : '#ef4444' }
-          ]}>
-            {isConnected ? 'En línea' : 'Offline'}
-          </Text>
-        </View>
+        <TouchableOpacity onPress={onRefresh} style={[styles.refreshBtn, { backgroundColor: colors.surface }]}>
+          <Ionicons name="refresh-outline" size={22} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
+      {renderTabs()}
+
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.primary}
-            colors={[colors.primary]}
-          />
-        }
+        style={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Estado de conexión */}
-        <View style={[styles.updateInfo, { backgroundColor: colors.surface }]}>
-          <Ionicons name="time-outline" size={14} color={colors.textHint} />
-          <Text style={[styles.updateText, { color: colors.textHint }]}>
-            Última actualización: {formatLastUpdate()}
-          </Text>
-          {isConnected && (
-            <View style={styles.liveIndicator}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Alertas */}
-        {hasAlerts && (
-          <AlertBanner alerts={alerts} colors={colors} />
-        )}
-
-        {/* Loading */}
-        {isLoading && (
-          <View style={[styles.loadingContainer, { backgroundColor: colors.surface }]}>
-            <LoadingSpinner />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Conectando a sensores...
-            </Text>
+        {!laguna && !isLoading ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="wifi-outline" size={48} color={colors.textSecondary} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>Sin datos de sensores</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Verifica la conexión del ESP32</Text>
+            <TouchableOpacity style={[styles.retryBtn, { backgroundColor: colors.primary }]} onPress={refresh}>
+              <Text style={styles.retryText}>Reintentar</Text>
+            </TouchableOpacity>
           </View>
-        )}
-
-        {/* Sin datos */}
-        {!isLoading && !laguna && (
-          <Card>
-            <CardBody>
-              <View style={styles.emptyContainer}>
-                <Ionicons name="cloud-offline-outline" size={64} color={colors.textHint} />
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>Sin datos</Text>
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                  No se encontraron datos en Firebase.
-                </Text>
-                <Text style={[styles.emptyHint, { color: colors.textHint }]}>
-                  Ruta esperada: /laguna1
-                </Text>
-              </View>
-            </CardBody>
-          </Card>
-        )}
-
-        {/* Sensores */}
-        {laguna && (
+        ) : (
           <>
-            {/* Estado General */}
-            <View style={[
-              styles.statusBanner,
-              { 
-                backgroundColor: hasCritical ? 'rgba(239, 68, 68, 0.1)' : 
-                                 hasAlerts ? 'rgba(245, 158, 11, 0.1)' : 
-                                 'rgba(34, 197, 94, 0.1)',
-                borderColor: hasCritical ? '#ef4444' : hasAlerts ? '#f59e0b' : '#22c55e'
-              }
-            ]}>
-              <Ionicons 
-                name={hasCritical ? 'warning' : hasAlerts ? 'alert-circle' : 'checkmark-circle'} 
-                size={24} 
-                color={hasCritical ? '#ef4444' : hasAlerts ? '#f59e0b' : '#22c55e'} 
-              />
-              <Text style={[
-                styles.statusText,
-                { color: hasCritical ? '#ef4444' : hasAlerts ? '#f59e0b' : '#22c55e' }
-              ]}>
-                {hasCritical ? 'Condiciones críticas' : 
-                 hasAlerts ? 'Alertas activas' : 
-                 'Condiciones óptimas para Tambaqui'}
-              </Text>
-            </View>
-
-            {/* Tarjetas de Sensores */}
-            {laguna.sensors.map((sensor) => (
-              <SensorCard 
-                key={sensor.id} 
-                sensor={sensor} 
-                colors={colors}
-                isConnected={isConnected}
-              />
-            ))}
-
-            {/* Control de Bomba */}
-            <BombaCard
-              isOn={laguna.bomba}
-              isConnected={isConnected}
-              onToggle={handleBombaToggle}
-              colors={colors}
-            />
-
-            {/* Estadísticas rápidas */}
-            <Card>
-              <CardHeader title="📊 Resumen del Sistema" />
-              <CardBody>
-                <View style={styles.statsGrid}>
-                  <StatItem 
-                    label="Sensores OK" 
-                    value={`${laguna.sensors.filter(s => s.status === 'normal').length}/${laguna.sensors.length}`}
-                    color="#22c55e"
-                    colors={colors}
-                  />
-                  <StatItem 
-                    label="Alertas" 
-                    value={alerts.length}
-                    color={hasAlerts ? '#ef4444' : '#22c55e'}
-                    colors={colors}
-                  />
-                  <StatItem 
-                    label="Bomba" 
-                    value={laguna.bomba ? 'ON' : 'OFF'}
-                    color={laguna.bomba ? '#3b82f6' : '#64748b'}
-                    colors={colors}
-                  />
-                  <StatItem 
-                    label="Estado" 
-                    value={isConnected ? 'Online' : 'Offline'}
-                    color={isConnected ? '#22c55e' : '#ef4444'}
-                    colors={colors}
-                  />
-                </View>
-              </CardBody>
-            </Card>
+            {activeTab === 'sensores' && renderSensores()}
+            {activeTab === 'graficos' && renderGraficos()}
+            {activeTab === 'ia'       && renderIA()}
           </>
         )}
-
-        {/* Información del Sistema */}
-        <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-          <View style={styles.infoHeader}>
-            <Ionicons name="fish" size={24} color="#3b82f6" />
-            <Text style={[styles.infoTitle, { color: colors.text }]}>
-              Sistema IoT para Tambaqui
-            </Text>
-          </View>
-          
-          <View style={styles.infoGrid}>
-            <View style={styles.infoColumn}>
-              <InfoItem 
-                icon="hardware-chip" 
-                text={`ESP32: ${isConnected ? 'Conectado' : 'Desconectado'}`}
-                color={isConnected ? '#22c55e' : '#ef4444'}
-                colors={colors}
-              />
-              <InfoItem 
-                icon="thermometer" 
-                text="Sensor: DS18B20"
-                colors={colors}
-              />
-              <InfoItem 
-                icon="flask" 
-                text="Sensor: pH analógico"
-                colors={colors}
-              />
-            </View>
-            <View style={styles.infoColumn}>
-              <InfoItem 
-                icon="cloud" 
-                text="Firebase Realtime DB"
-                colors={colors}
-              />
-              <InfoItem 
-                icon="notifications" 
-                text="Notificación: ≥ 36°C"
-                color="#ef4444"
-                colors={colors}
-              />
-              <InfoItem 
-                icon="time" 
-                text="Cooldown: 5 min"
-                colors={colors}
-              />
-            </View>
-          </View>
-
-          <View style={[styles.tambaquiInfo, { borderTopColor: colors.border }]}>
-            <Text style={[styles.tambaquiTitle, { color: colors.text }]}>
-              🐟 {TAMBAQUI_INFO.nombre}
-            </Text>
-            {TAMBAQUI_INFO.caracteristicas.map((item, index) => (
-              <Text key={index} style={[styles.tambaquiItem, { color: colors.textSecondary }]}>
-                • {item}
-              </Text>
-            ))}
-          </View>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
 };
 
-// ============================================
-// COMPONENTE: Tarjeta de Sensor
-// ============================================
-const SensorCard = ({ sensor, colors, isConnected }) => {
-  const getStatusColor = () => {
-    if (!isConnected) return '#9ca3af';
-    switch (sensor.status) {
-      case 'critical': return '#ef4444';
-      case 'warning': return '#f59e0b';
-      default: return '#22c55e';
-    }
-  };
-
-  const isOutOfRange = sensor.status === 'critical' || sensor.status === 'warning';
-
-  const getProgress = () => {
-    if (sensor.isBoolean) return sensor.boolValue ? 100 : 0;
-    const value = parseFloat(sensor.value);
-    const min = sensor.minValue || 0;
-    const max = sensor.maxValue || 100;
-    return Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
-  };
-
-  return (
-    <View style={[
-      styles.sensorCard,
-      { 
-        backgroundColor: colors.surface,
-        borderColor: isOutOfRange ? getStatusColor() : colors.border,
-        borderWidth: isOutOfRange ? 1 : 0,
-      }
-    ]}>
-      <View style={styles.sensorHeader}>
-        <View style={[styles.sensorIcon, { backgroundColor: `${sensor.color}20` }]}>
-          <Ionicons name={sensor.icon} size={24} color={sensor.color} />
-          {!isConnected && <View style={styles.offlineDot} />}
-        </View>
-        
-        <View style={styles.sensorInfo}>
-          <View style={styles.sensorTitleRow}>
-            <Text style={[styles.sensorLabel, { color: colors.textSecondary }]}>
-              {sensor.label}
-            </Text>
-            <View style={[styles.statusIndicator, { backgroundColor: getStatusColor() }]} />
-          </View>
-          
-          <View style={styles.sensorValueRow}>
-            <Text style={[
-              styles.sensorValue,
-              { color: isConnected ? (isOutOfRange ? '#ef4444' : colors.text) : colors.textHint }
-            ]}>
-              {isConnected ? sensor.value : '--'}
-            </Text>
-            <Text style={[styles.sensorUnit, { color: colors.textSecondary }]}>
-              {sensor.unit}
-            </Text>
-          </View>
-
-          {!sensor.isBoolean && (
-            <Text style={[styles.sensorRange, { color: colors.textHint }]}>
-              Rango: {sensor.minValue} - {sensor.maxValue} {sensor.unit}
-            </Text>
-          )}
-        </View>
-      </View>
-
-      {/* Barra de progreso */}
-      {isConnected && !sensor.isBoolean && (
-        <View style={styles.progressContainer}>
-          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
-            <View 
-              style={[
-                styles.progressFill,
-                { 
-                  width: `${getProgress()}%`,
-                  backgroundColor: getStatusColor()
-                }
-              ]} 
-            />
-          </View>
-        </View>
-      )}
-
-      {/* Estado fuera de rango */}
-      {isConnected && isOutOfRange && (
-        <View style={styles.alertTag}>
-          <Ionicons name="warning" size={12} color="#ef4444" />
-          <Text style={styles.alertTagText}>Fuera de rango</Text>
-        </View>
-      )}
-    </View>
-  );
-};
-
-// ============================================
-// COMPONENTE: Tarjeta de Bomba
-// ============================================
-const BombaCard = ({ isOn, isConnected, onToggle, colors }) => (
-  <View style={[
-    styles.bombaCard,
-    { 
-      backgroundColor: colors.surface,
-      borderColor: isOn ? '#22c55e' : colors.border,
-      borderWidth: isOn ? 1 : 0,
-    }
-  ]}>
-    <View style={styles.bombaHeader}>
-      <View style={[
-        styles.bombaIcon,
-        { backgroundColor: isOn ? 'rgba(34, 197, 94, 0.2)' : 'rgba(100, 116, 139, 0.2)' }
-      ]}>
-        <Ionicons 
-          name="water" 
-          size={24} 
-          color={isOn ? '#22c55e' : '#64748b'} 
-        />
-      </View>
-      
-      <View style={styles.bombaInfo}>
-        <Text style={[styles.bombaLabel, { color: colors.textSecondary }]}>
-          Bomba de Enfriamiento
-        </Text>
-        <Text style={[
-          styles.bombaStatus,
-          { color: isConnected ? (isOn ? '#22c55e' : colors.text) : colors.textHint }
-        ]}>
-          {isConnected ? (isOn ? 'ENCENDIDA' : 'APAGADA') : 'SIN CONEXIÓN'}
-        </Text>
-        <Text style={[styles.bombaHint, { color: colors.textHint }]}>
-          Auto-activación cuando temp ≥ 36°C
-        </Text>
-      </View>
-
-      <Switch
-        value={isOn}
-        onValueChange={onToggle}
-        disabled={!isConnected}
-        trackColor={{ false: '#334155', true: '#22c55e' }}
-        thumbColor={isOn ? '#fff' : '#94a3b8'}
-      />
-    </View>
-
-    {isOn && isConnected && (
-      <View style={styles.bombaActive}>
-        <Ionicons name="flash" size={14} color="#22c55e" />
-        <Text style={styles.bombaActiveText}>Enfriando agua...</Text>
-      </View>
-    )}
-  </View>
-);
-
-// ============================================
-// COMPONENTE: Banner de Alertas
-// ============================================
-const AlertBanner = ({ alerts, colors }) => {
-  const criticalAlerts = alerts.filter(a => a.status === 'critical');
-  const warningAlerts = alerts.filter(a => a.status === 'warning');
-
-  return (
-    <View style={styles.alertBanner}>
-      {criticalAlerts.length > 0 && (
-        <View style={[styles.alertBox, styles.alertCritical]}>
-          <Ionicons name="warning" size={20} color="#ef4444" />
-          <View style={styles.alertContent}>
-            <Text style={styles.alertTitle}>Alertas Críticas</Text>
-            {criticalAlerts.map((alert, index) => (
-              <Text key={index} style={styles.alertMessage}>• {alert.message}</Text>
-            ))}
-          </View>
-        </View>
-      )}
-      
-      {warningAlerts.length > 0 && (
-        <View style={[styles.alertBox, styles.alertWarning]}>
-          <Ionicons name="alert-circle" size={20} color="#f59e0b" />
-          <View style={styles.alertContent}>
-            <Text style={[styles.alertTitle, { color: '#92400e' }]}>Advertencias</Text>
-            {warningAlerts.map((alert, index) => (
-              <Text key={index} style={[styles.alertMessage, { color: '#92400e' }]}>
-                • {alert.message}
-              </Text>
-            ))}
-          </View>
-        </View>
-      )}
-    </View>
-  );
-};
-
-// ============================================
-// COMPONENTES AUXILIARES
-// ============================================
-const StatItem = ({ label, value, color, colors }) => (
-  <View style={styles.statItem}>
-    <Text style={[styles.statValue, { color }]}>{value}</Text>
-    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{label}</Text>
-  </View>
-);
-
-const InfoItem = ({ icon, text, color, colors }) => (
-  <View style={styles.infoItem}>
-    <Ionicons name={icon} size={14} color={color || colors.primary} />
-    <Text style={[styles.infoText, { color: colors.textSecondary }]}>{text}</Text>
-  </View>
-);
-
-// ============================================
-// ESTILOS
-// ============================================
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-  },
-  headerTitle: { fontSize: 28, fontWeight: 'bold' },
-  headerSubtitle: { fontSize: 14, marginTop: 2 },
-  connectionBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.full,
-    gap: 6,
-  },
-  connectionDot: { width: 8, height: 8, borderRadius: 4 },
-  connectionText: { fontSize: 12, fontWeight: '600' },
-  scrollView: { flex: 1 },
-  scrollContent: { padding: SPACING.lg, paddingBottom: 100 },
-  updateInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.md,
-  },
-  updateText: { fontSize: 12 },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.full,
-    marginLeft: SPACING.sm,
-  },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444', marginRight: 4 },
-  liveText: { fontSize: 10, fontWeight: 'bold', color: '#ef4444' },
-  statusBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    gap: SPACING.sm,
-  },
-  statusText: { fontSize: 14, fontWeight: '600', flex: 1 },
-  loadingContainer: {
-    alignItems: 'center',
-    padding: SPACING.xl,
-    borderRadius: BORDER_RADIUS.lg,
-    marginBottom: SPACING.md,
-  },
-  loadingText: { marginTop: SPACING.md, fontSize: 14 },
-  emptyContainer: { alignItems: 'center', padding: SPACING.xl },
-  emptyTitle: { fontSize: 20, fontWeight: 'bold', marginTop: SPACING.md },
-  emptyText: { fontSize: 14, textAlign: 'center', marginTop: SPACING.sm },
-  emptyHint: { fontSize: 12, textAlign: 'center', marginTop: SPACING.md },
-  sensorCard: { borderRadius: BORDER_RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md },
-  sensorHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  sensorIcon: { width: 48, height: 48, borderRadius: BORDER_RADIUS.md, justifyContent: 'center', alignItems: 'center' },
-  offlineDot: { position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444' },
-  sensorInfo: { flex: 1, marginLeft: SPACING.md },
-  sensorTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sensorLabel: { fontSize: 14, fontWeight: '500' },
-  statusIndicator: { width: 8, height: 8, borderRadius: 4 },
-  sensorValueRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 4 },
-  sensorValue: { fontSize: 28, fontWeight: 'bold' },
-  sensorUnit: { fontSize: 14, marginLeft: 4 },
-  sensorRange: { fontSize: 11, marginTop: 4 },
-  progressContainer: { marginTop: SPACING.md },
-  progressBar: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 3 },
-  alertTag: { flexDirection: 'row', alignItems: 'center', marginTop: SPACING.sm, gap: 4 },
-  alertTagText: { fontSize: 11, color: '#ef4444', fontWeight: '500' },
-  bombaCard: { borderRadius: BORDER_RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md },
-  bombaHeader: { flexDirection: 'row', alignItems: 'center' },
-  bombaIcon: { width: 48, height: 48, borderRadius: BORDER_RADIUS.md, justifyContent: 'center', alignItems: 'center' },
-  bombaInfo: { flex: 1, marginLeft: SPACING.md },
-  bombaLabel: { fontSize: 14, fontWeight: '500' },
-  bombaStatus: { fontSize: 20, fontWeight: 'bold', marginTop: 2 },
-  bombaHint: { fontSize: 11, marginTop: 2 },
-  bombaActive: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(34, 197, 94, 0.2)',
-    gap: 4,
-  },
-  bombaActiveText: { fontSize: 12, color: '#22c55e', fontWeight: '500' },
-  alertBanner: { marginBottom: SPACING.md, gap: SPACING.sm },
-  alertBox: { flexDirection: 'row', padding: SPACING.md, borderRadius: BORDER_RADIUS.md, gap: SPACING.sm },
-  alertCritical: { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
-  alertWarning: { backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' },
-  alertContent: { flex: 1 },
-  alertTitle: { fontSize: 13, fontWeight: '600', color: '#991b1b', marginBottom: 4 },
-  alertMessage: { fontSize: 12, color: '#991b1b' },
-  statsGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  statItem: { alignItems: 'center', flex: 1 },
-  statValue: { fontSize: 20, fontWeight: 'bold' },
-  statLabel: { fontSize: 11, marginTop: 2 },
-  infoCard: { borderRadius: BORDER_RADIUS.lg, padding: SPACING.md, marginTop: SPACING.md },
-  infoHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.md },
-  infoTitle: { fontSize: 16, fontWeight: '600' },
-  infoGrid: { flexDirection: 'row', gap: SPACING.md },
-  infoColumn: { flex: 1, gap: SPACING.sm },
-  infoItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  infoText: { fontSize: 12 },
-  tambaquiInfo: { marginTop: SPACING.md, paddingTop: SPACING.md, borderTopWidth: 1 },
-  tambaquiTitle: { fontSize: 14, fontWeight: '600', marginBottom: SPACING.sm },
-  tambaquiItem: { fontSize: 12, marginTop: 2 },
+  container:       { flex: 1 },
+  header:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md },
+  headerTitle:     { fontSize: 24, fontWeight: 'bold' },
+  headerStatus:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  statusDot:       { width: 8, height: 8, borderRadius: 4 },
+  statusText:      { fontSize: 12 },
+  refreshBtn:      { padding: 8, borderRadius: 10 },
+  tabBar:          { flexDirection: 'row', borderBottomWidth: 1, marginHorizontal: SPACING.lg, borderRadius: BORDER_RADIUS.md, marginBottom: SPACING.sm },
+  tab:             { flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3 },
+  tabLabel:        { fontSize: 11, fontWeight: '500' },
+  scroll:          { flex: 1 },
+  sectionContent:  { padding: SPACING.lg, gap: SPACING.md },
+  alertBanner:     { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: BORDER_RADIUS.md, borderWidth: 1 },
+  alertText:       { color: '#ef4444', fontWeight: '500', fontSize: 13 },
+  sensorCard:      { borderRadius: BORDER_RADIUS.lg, borderWidth: 1, padding: SPACING.md },
+  sensorRow:       { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  sensorIcon:      { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  sensorInfo:      { flex: 1 },
+  sensorLabel:     { fontSize: 12, marginBottom: 2 },
+  sensorValueRow:  { flexDirection: 'row', alignItems: 'center' },
+  sensorValue:     { fontSize: 22, fontWeight: '700' },
+  sensorRange:     { fontSize: 11, textAlign: 'right' },
+  progressBg:      { height: 6, borderRadius: 3, overflow: 'hidden' },
+  progressFill:    { height: '100%', borderRadius: 3 },
+  bombaCard:       { borderRadius: BORDER_RADIUS.lg, borderWidth: 1, padding: SPACING.md },
+  bombaRow:        { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bombaInfo:       { flex: 1 },
+  bombaTitle:      { fontSize: 15, fontWeight: '500' },
+  bombaStatus:     { fontSize: 12, marginTop: 2 },
+  rangePicker:     { flexDirection: 'row', borderRadius: BORDER_RADIUS.md, borderWidth: 1, padding: 4, gap: 4 },
+  rangeTab:        { flex: 1, paddingVertical: 6, borderRadius: 8, alignItems: 'center' },
+  rangeTabText:    { fontSize: 13, fontWeight: '500' },
+  chartCard:       { borderRadius: BORDER_RADIUS.lg, borderWidth: 1, padding: SPACING.md },
+  chartHeader:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  chartDot:        { width: 10, height: 10, borderRadius: 5 },
+  chartTitle:      { flex: 1, fontSize: 14, fontWeight: '600' },
+  chartCurrent:    { fontSize: 14, fontWeight: '700' },
+  chartFooter:     { fontSize: 10, marginTop: 4, textAlign: 'center' },
+  iaHeader:        { flexDirection: 'row', alignItems: 'flex-start', padding: SPACING.md, borderRadius: BORDER_RADIUS.lg, borderWidth: 1 },
+  iaTitle:         { fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  iaSub:           { fontSize: 11 },
+  gaugesRow:       { flexDirection: 'row', gap: SPACING.md },
+  gaugeBox:        { flex: 1, borderRadius: BORDER_RADIUS.lg, borderWidth: 1, padding: SPACING.md, alignItems: 'center' },
+  gaugeLabel:      { fontSize: 11, marginBottom: 8 },
+  gaugeBarContainer:{ width: '100%', flexDirection: 'row', alignItems: 'center', gap: 6 },
+  gaugeBarBg:      { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden' },
+  gaugeBarFill:    { height: '100%', borderRadius: 4 },
+  gaugeScore:      { fontSize: 16, fontWeight: '700', width: 28, textAlign: 'right' },
+  gaugeLevelText:  { fontSize: 11, fontWeight: '500', marginTop: 4 },
+  projCard:        { borderRadius: BORDER_RADIUS.lg, borderWidth: 1, padding: SPACING.md },
+  projTitle:       { fontSize: 14, fontWeight: '600', marginBottom: 10 },
+  projRow:         { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, flexWrap: 'wrap' },
+  projDot:         { width: 8, height: 8, borderRadius: 4 },
+  projLabel:       { fontSize: 12, fontWeight: '500', width: 80 },
+  projVal:         { fontSize: 11, flex: 1 },
+  recCard:         { borderRadius: BORDER_RADIUS.lg, borderWidth: 1, padding: SPACING.md },
+  recRow:          { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 8 },
+  recText:         { flex: 1, fontSize: 13 },
+  centered:        { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText:     { marginTop: 12, fontSize: 14 },
+  emptyState:      { flex: 1, alignItems: 'center', paddingTop: 80, gap: 8 },
+  emptyTitle:      { fontSize: 18, fontWeight: '600' },
+  emptyText:       { fontSize: 14 },
+  retryBtn:        { marginTop: 12, paddingHorizontal: 24, paddingVertical: 10, borderRadius: BORDER_RADIUS.lg },
+  retryText:       { color: '#fff', fontWeight: '600' },
 });
 
 export default MonitoringScreen;

@@ -57,13 +57,10 @@ const TiendaScreen = ({ navigation }) => {
         rawProductos?.productos ??
         rawProductos ?? [];
 
-      console.log('🏭 Productores raw:', JSON.stringify(rawProductores));
-      console.log('🐟 Productos raw:', JSON.stringify(rawProductos));
 
       setProductores(Array.isArray(extractedProductores) ? extractedProductores : []);
       setProductos(Array.isArray(extractedProductos) ? extractedProductos : []);
     } catch (error) {
-      console.log('Error fetchData:', error);
       setProductores([]);
       setProductos([]);
     } finally {

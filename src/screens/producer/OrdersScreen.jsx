@@ -15,22 +15,23 @@ import { LoadingSpinner } from '../../components/common/Loading';
 import { SPACING, BORDER_RADIUS } from '../../constants/theme';
 
 const ORDER_STATES = {
-  pendiente: { label: 'Pendiente', color: '#f59e0b', icon: 'time-outline', bgColor: 'rgba(245, 158, 11, 0.1)' },
-  confirmado: { label: 'Confirmado', color: '#3b82f6', icon: 'checkmark-circle-outline', bgColor: 'rgba(59, 130, 246, 0.1)' },
-  'en preparación': { label: 'En Preparación', color: '#8b5cf6', icon: 'construct-outline', bgColor: 'rgba(139, 92, 246, 0.1)' },
-  'en preparacion': { label: 'En Preparación', color: '#8b5cf6', icon: 'construct-outline', bgColor: 'rgba(139, 92, 246, 0.1)' },
-  'en camino': { label: 'En Camino', color: '#14b8a6', icon: 'car-outline', bgColor: 'rgba(20, 184, 166, 0.1)' },
-  entregado: { label: 'Entregado', color: '#22c55e', icon: 'checkmark-done-outline', bgColor: 'rgba(34, 197, 94, 0.1)' },
-  cancelado: { label: 'Cancelado', color: '#ef4444', icon: 'close-circle-outline', bgColor: 'rgba(239, 68, 68, 0.1)' },
+  pendiente:          { label: 'Pendiente',          color: '#f59e0b', icon: 'time-outline',            bgColor: 'rgba(245,158,11,0.1)'  },
+  confirmado:         { label: 'Confirmado',          color: '#3b82f6', icon: 'checkmark-circle-outline', bgColor: 'rgba(59,130,246,0.1)'  },
+  preparando:         { label: 'En Preparación',      color: '#8b5cf6', icon: 'construct-outline',        bgColor: 'rgba(139,92,246,0.1)'  },
+  listo_para_recoger: { label: 'Listo para recoger',  color: '#f97316', icon: 'bag-check-outline',        bgColor: 'rgba(249,115,22,0.1)'  },
+  en_camino:          { label: 'En Camino',            color: '#14b8a6', icon: 'bicycle-outline',          bgColor: 'rgba(20,184,166,0.1)'  },
+  entregado:          { label: 'Entregado',            color: '#22c55e', icon: 'checkmark-done-outline',   bgColor: 'rgba(34,197,94,0.1)'   },
+  cancelado:          { label: 'Cancelado',            color: '#ef4444', icon: 'close-circle-outline',     bgColor: 'rgba(239,68,68,0.1)'   },
 };
 
 const FILTER_OPTIONS = [
-  { value: 'todos', label: 'Todos' },
-  { value: 'pendiente', label: 'Pendientes' },
-  { value: 'confirmado', label: 'Confirmados' },
-  { value: 'en preparación', label: 'En Preparación' },
-  { value: 'en camino', label: 'En Camino' },
-  { value: 'entregado', label: 'Entregados' },
+  { value: 'todos',             label: 'Todos'             },
+  { value: 'pendiente',         label: 'Pendientes'        },
+  { value: 'confirmado',        label: 'Confirmados'       },
+  { value: 'preparando',        label: 'En Preparación'    },
+  { value: 'listo_para_recoger',label: 'Listos para recoger'},
+  { value: 'en_camino',         label: 'En Camino'         },
+  { value: 'entregado',         label: 'Entregados'        },
 ];
 
 const OrdersScreen = () => {
@@ -108,11 +109,12 @@ const OrdersScreen = () => {
   });
 
   const countByStatus = {
-    pendiente: stats.pendientes,
-    confirmado: stats.confirmados,
-    preparacion: stats.enPreparacion,
-    camino: stats.enCamino,
-    entregado: stats.entregados,
+    pendiente:         stats.pendientes,
+    confirmado:        stats.confirmados,
+    preparando:        stats.preparando,
+    listo_para_recoger:stats.listoParaRecoger,
+    en_camino:         stats.enCamino,
+    entregado:         stats.entregados,
   };
 
   // ✅ Siempre usar el pedido más actualizado del state
@@ -160,11 +162,12 @@ const OrdersScreen = () => {
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.summaryScroll} contentContainerStyle={styles.summaryContent}>
         {[
-          { icon: 'time', label: 'Pendientes', value: countByStatus.pendiente, color: '#f59e0b', filter: 'pendiente' },
-          { icon: 'checkmark-circle', label: 'Confirmados', value: countByStatus.confirmado, color: '#3b82f6', filter: 'confirmado' },
-          { icon: 'construct', label: 'Preparación', value: countByStatus.preparacion, color: '#8b5cf6', filter: 'en preparación' },
-          { icon: 'car', label: 'En Camino', value: countByStatus.camino, color: '#14b8a6', filter: 'en camino' },
-          { icon: 'checkmark-done', label: 'Entregados', value: countByStatus.entregado, color: '#22c55e', filter: 'entregado' },
+          { icon: 'time',             label: 'Pendientes',  value: countByStatus.pendiente,          color: '#f59e0b', filter: 'pendiente'          },
+          { icon: 'checkmark-circle', label: 'Confirmados', value: countByStatus.confirmado,         color: '#3b82f6', filter: 'confirmado'         },
+          { icon: 'construct',        label: 'Preparando',  value: countByStatus.preparando,         color: '#8b5cf6', filter: 'preparando'         },
+          { icon: 'bag-check',        label: 'Para recoger',value: countByStatus.listo_para_recoger, color: '#f97316', filter: 'listo_para_recoger' },
+          { icon: 'bicycle',          label: 'En Camino',   value: countByStatus.en_camino,          color: '#14b8a6', filter: 'en_camino'          },
+          { icon: 'checkmark-done',   label: 'Entregados',  value: countByStatus.entregado,          color: '#22c55e', filter: 'entregado'          },
         ].map((item) => (
           <SummaryCard key={item.filter} {...item} active={statusFilter === item.filter}
             onPress={() => setStatusFilter(statusFilter === item.filter ? 'todos' : item.filter)} colors={colors} />
@@ -295,18 +298,18 @@ const OrderCard = ({ pedido, onPress, onConfirmar, colors }) => {
             </View>
           )}
           {pedido.estado === 'confirmado' && (
-            <TouchableOpacity style={[styles.actionButton, styles.prepareButton]} onPress={() => onConfirmar(pedido.id, 'en preparación')}>
+            <TouchableOpacity style={[styles.actionButton, styles.prepareButton]} onPress={() => onConfirmar(pedido.id, 'preparando')}>
               <Ionicons name="construct-outline" size={18} color="#fff" />
               <Text style={styles.actionButtonText}>Iniciar Preparación</Text>
             </TouchableOpacity>
           )}
-          {(pedido.estado === 'en preparación' || pedido.estado === 'en preparacion') && (
-            <TouchableOpacity style={[styles.actionButton, styles.shipButton]} onPress={() => onConfirmar(pedido.id, 'en camino')}>
-              <Ionicons name="car-outline" size={18} color="#fff" />
-              <Text style={styles.actionButtonText}>Enviar</Text>
+          {pedido.estado === 'preparando' && (
+            <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#f97316' }]} onPress={() => onConfirmar(pedido.id, 'listo_para_recoger')}>
+              <Ionicons name="bag-check-outline" size={18} color="#fff" />
+              <Text style={styles.actionButtonText}>Listo para recoger</Text>
             </TouchableOpacity>
           )}
-          {pedido.estado === 'en camino' && (
+          {pedido.estado === 'en_camino' && (
             <TouchableOpacity style={[styles.actionButton, styles.deliverButton]} onPress={() => onConfirmar(pedido.id, 'entregado')}>
               <Ionicons name="checkmark-done-outline" size={18} color="#fff" />
               <Text style={styles.actionButtonText}>Marcar Entregado</Text>
@@ -322,11 +325,12 @@ const OrderDetail = ({ pedido, onClose, onCambiarEstado, colors }) => {
   const estadoInfo = ORDER_STATES[pedido.estado] || ORDER_STATES.pendiente;
   const getNextState = () => {
     switch (pedido.estado) {
-      case 'pendiente': return 'confirmado';
-      case 'confirmado': return 'en preparación';
-      case 'en preparación': case 'en preparacion': return 'en camino';
-      case 'en camino': return 'entregado';
-      default: return null;
+      case 'pendiente':          return 'confirmado';
+      case 'confirmado':         return 'preparando';
+      case 'preparando':         return 'listo_para_recoger';
+      case 'listo_para_recoger': return 'en_camino';
+      case 'en_camino':          return 'entregado';
+      default:                   return null;
     }
   };
   const nextState = getNextState();

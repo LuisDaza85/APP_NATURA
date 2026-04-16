@@ -22,6 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '../../contexts/ThemeContext';
+import QRCode from 'react-native-qrcode-svg';
+import { Modal as RNModal, Share } from 'react-native';
 import { productService } from '../../api/services';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 
@@ -45,7 +47,8 @@ const InventarioScreen = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentProduct, setCurrentProduct] = useState(null);
   const [saving, setSaving] = useState(false);
-  
+  const [qrProducto, setQrProducto] = useState(null);  // producto al que se le muestra el QR
+
   // Form data
   const [formData, setFormData] = useState({
     nombre: '',
@@ -56,11 +59,11 @@ const InventarioScreen = () => {
     imagen: '',
   });
 
-  // Categorías disponibles
-  const categorias = [
+  // Categorías dinámicas del backend
+  const [categorias, setCategorias] = useState([
     { id: '1', nombre: 'Pescados' },
     { id: '2', nombre: 'Mariscos' },
-  ];
+  ]);
 
   // ============================================
   // CARGAR PRODUCTOS
@@ -616,7 +619,7 @@ const FilterChip = ({ label, active, onPress, colors }) => (
   </TouchableOpacity>
 );
 
-const ProductoCard = ({ producto, onEdit, onDelete, colors }) => {
+const ProductoCard = ({ producto, onEdit, onDelete, onQR, colors }) => {
   const getStockStatus = () => {
     if (producto.stock <= 0) return { label: 'Agotado', color: '#ef4444' };
     if (producto.stock < 10) return { label: 'Stock bajo', color: '#f59e0b' };
@@ -664,6 +667,12 @@ const ProductoCard = ({ producto, onEdit, onDelete, colors }) => {
 
         {/* Acciones */}
         <View style={styles.productoActions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#7c3aed15' }]}
+            onPress={onQR}
+          >
+            <Ionicons name="qr-code-outline" size={18} color="#7c3aed" />
+          </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.actionBtn, { backgroundColor: colors.background }]}
             onPress={onEdit}
@@ -943,6 +952,8 @@ const styles = StyleSheet.create({
   halfInput: {
     flex: 1,
   },
+  qrButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
+  qrButtonText: { fontSize: 12, fontWeight: '600' },
   categoriaContainer: {
     flexDirection: 'row',
     gap: SPACING.sm,
@@ -1029,5 +1040,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+// ── Modal QR ──────────────────────────────────────────────────
+// Agregar esto dentro del return del componente InventarioScreen,
+// justo antes del último </SafeAreaView>:
+//
+// {qrProducto && (
+//   <RNModal visible={!!qrProducto} transparent animationType="slide" onRequestClose={() => setQrProducto(null)}>
+//     <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+//       <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, alignItems: 'center' }}>
+//         <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 }}>{qrProducto.nombre}</Text>
+//         <Text style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 16 }}>ID #{qrProducto.id}</Text>
+//         <View style={{ padding: 16, backgroundColor: '#f0fdfa', borderRadius: 16, borderWidth: 2, borderColor: '#5eead4' }}>
+//           <QRCode value={`https://naturapiscis.com/trazabilidad/${qrProducto.id}`} size={180} color="#0f766e" backgroundColor="#f0fdfa" />
+//         </View>
+//         <TouchableOpacity style={{ marginTop: 16, backgroundColor: '#0d9488', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 }}
+//           onPress={() => handleCompartirQR(qrProducto)}>
+//           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Compartir QR</Text>
+//         </TouchableOpacity>
+//         <TouchableOpacity style={{ marginTop: 10, paddingVertical: 10 }} onPress={() => setQrProducto(null)}>
+//           <Text style={{ color: colors.textSecondary }}>Cerrar</Text>
+//         </TouchableOpacity>
+//       </View>
+//     </View>
+//   </RNModal>
+// )}
 
 export default InventarioScreen;

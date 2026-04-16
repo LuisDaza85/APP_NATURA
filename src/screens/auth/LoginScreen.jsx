@@ -1,7 +1,7 @@
 // src/screens/auth/LoginScreen.jsx
 // Pantalla de Login con diseño igual a la web
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
@@ -29,6 +31,48 @@ const LoginScreen = ({ navigation }) => {
 
   const { login } = useAuth();
   const { colors, isDarkMode } = useTheme();
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricType, setBiometricType]           = useState(null); // 'face' | 'fingerprint'
+
+  useEffect(() => {
+    checkBiometric();
+  }, []);
+
+  const checkBiometric = async () => {
+    try {
+      const compatible = await LocalAuthentication.hasHardwareAsync();
+      const enrolled   = await LocalAuthentication.isEnrolledAsync();
+      if (compatible && enrolled) {
+        const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+        const isFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+        setBiometricType(isFace ? 'face' : 'fingerprint');
+        setBiometricAvailable(true);
+      }
+    } catch {}
+  };
+
+  const handleBiometricLogin = async () => {
+    try {
+      // Verificar que hay credenciales guardadas
+      const savedEmail    = await SecureStore.getItemAsync('saved_email');
+      const savedPassword = await SecureStore.getItemAsync('saved_password');
+      if (!savedEmail || !savedPassword) {
+        setErrorMsg('Primero inicia sesión manualmente para activar la biometría');
+        return;
+      }
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Confirma tu identidad',
+        cancelLabel:   'Cancelar',
+        fallbackLabel: 'Usar contraseña',
+      });
+      if (result.success) {
+        setIsLoading(true);
+        const loginResult = await login(savedEmail, savedPassword);
+        if (!loginResult.success) setErrorMsg('Error de autenticación');
+        setIsLoading(false);
+      }
+    } catch { setErrorMsg('Error con biometría'); }
+  };
 
   const handleLogin = async () => {
     setErrorMsg('');
@@ -40,6 +84,10 @@ const LoginScreen = ({ navigation }) => {
 
     setIsLoading(true);
     try {
+      if (rememberMe) {
+        await SecureStore.setItemAsync('saved_email', email);
+        await SecureStore.setItemAsync('saved_password', password);
+      }
       const result = await login(email, password);
       if (!result.success) {
         setErrorMsg(result.error || 'Error de credenciales');
@@ -139,6 +187,24 @@ const LoginScreen = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Biometría */}
+            {biometricAvailable && (
+              <TouchableOpacity
+                style={[styles.biometricBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={handleBiometricLogin}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={biometricType === 'face' ? 'scan-outline' : 'finger-print-outline'}
+                  size={22}
+                  color={colors.primary}
+                />
+                <Text style={[styles.biometricText, { color: colors.text }]}>
+                  {biometricType === 'face' ? 'Acceder con Face ID' : 'Acceder con huella'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {/* Remember Me & Forgot Password */}
             <View style={styles.optionsRow}>
               <TouchableOpacity 
@@ -188,7 +254,7 @@ const LoginScreen = ({ navigation }) => {
           {/* Footer - Registro */}
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: colors.textSecondary }]}>¿No tienes cuenta? </Text>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Registro')}>
               <Text style={[styles.footerLink, { color: colors.primary }]}>Regístrate</Text>
             </TouchableOpacity>
           </View>
@@ -319,6 +385,20 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     ...SHADOWS.primary,
+  },
+  biometricBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1.5,
+    marginBottom: 12,
+  },
+  biometricText: {
+    fontSize: 15,
+    fontWeight: '500',
   },
   loginButtonDisabled: {
     opacity: 0.7,

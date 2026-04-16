@@ -21,6 +21,7 @@ const { width } = Dimensions.get('window');
 
 const HomeScreenConsumer = ({ navigation }) => {
   const { user } = useAuth();
+  const handleBuscar = () => navigation.navigate('Busqueda');
   const { colors } = useTheme();
   
   const [refreshing, setRefreshing] = useState(false);
@@ -42,7 +43,7 @@ const HomeScreenConsumer = ({ navigation }) => {
       setProductos(prodRes.data.data || prodRes.data || []);
       setPedidos(pedRes.data.data || pedRes.data || []);
     } catch (error) {
-      console.log('Error fetching data:', error);
+      // silenciar errores
     } finally {
       setLoading(false);
     }
@@ -53,6 +54,12 @@ const HomeScreenConsumer = ({ navigation }) => {
     await fetchData();
     setRefreshing(false);
   }, []);
+
+  // Pedido en_camino o activo (para el banner)
+  const pedidoActivo = pedidos.find(p =>
+    ['en_camino', 'listo_para_recoger', 'preparando', 'confirmado'].includes(p.estado || p.status)
+  );
+  const pedidoEnCamino = pedidos.find(p => (p.estado || p.status) === 'en_camino');
 
   const getStatusColor = (estado) => {
     const map = {
@@ -112,6 +119,46 @@ const HomeScreenConsumer = ({ navigation }) => {
           <Ionicons name="fish-outline" size={80} color="rgba(255,255,255,0.3)" />
         </View>
       </LinearGradient>
+
+      {/* ── Banner pedido activo ── */}
+      {pedidoEnCamino && (
+        <TouchableOpacity
+          style={styles.activeBanner}
+          onPress={() => navigation.navigate('TrackingPedido', { pedidoId: pedidoEnCamino.rawId || pedidoEnCamino.id })}
+          activeOpacity={0.9}
+        >
+          <View style={styles.activeBannerLeft}>
+            <View style={styles.activePulse}>
+              <Ionicons name="bicycle" size={22} color="#fff" />
+            </View>
+            <View>
+              <Text style={styles.activeBannerTitle}>Tu pedido está en camino</Text>
+              <Text style={styles.activeBannerSub}>Toca para ver el mapa en tiempo real</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.8)" />
+        </TouchableOpacity>
+      )}
+
+      {/* Banner pedido pendiente/preparando */}
+      {!pedidoEnCamino && pedidoActivo && (
+        <TouchableOpacity
+          style={[styles.activeBanner, { backgroundColor: '#3b82f6' }]}
+          onPress={() => navigation.navigate('MisPedidos')}
+          activeOpacity={0.9}
+        >
+          <View style={styles.activeBannerLeft}>
+            <View style={[styles.activePulse, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
+              <Ionicons name="time-outline" size={20} color="#fff" />
+            </View>
+            <View>
+              <Text style={styles.activeBannerTitle}>Pedido en proceso</Text>
+              <Text style={styles.activeBannerSub}>{getStatusLabel(pedidoActivo.estado || pedidoActivo.status)}</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.8)" />
+        </TouchableOpacity>
+      )}
 
       {/* Features */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.featuresContainer}>
@@ -279,6 +326,16 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 11, fontWeight: '600' },
   orderTotal: { fontSize: 14, fontWeight: '600' },
   // ✅ Botón tracking
+  activeBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#0d9488', marginHorizontal: 16, marginBottom: 12,
+    borderRadius: 16, padding: 14, elevation: 4,
+    shadowColor: '#0d9488', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 6,
+  },
+  activeBannerLeft:  { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  activePulse:       { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  activeBannerTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  activeBannerSub:   { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 1 },
   trackingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#3B82F6', paddingVertical: 10, gap: 6 },
   trackingBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   emptyOrderState: { padding: 32, borderRadius: 12, alignItems: 'center' },

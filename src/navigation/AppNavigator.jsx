@@ -1,4 +1,4 @@
-// src/navigation/AppNavigator.jsx
+﻿// src/navigation/AppNavigator.jsx
 // Navegador principal de la aplicación con soporte para Productor, Consumidor y Repartidor
 
 import React from 'react';
@@ -18,6 +18,12 @@ import { LoadingScreen } from '../components/common/Loading';
 // SCREENS - AUTENTICACIÓN
 // ============================================
 import LoginScreen from '../screens/auth/LoginScreen';
+import OnboardingScreen from '../screens/auth/OnboardingScreen';
+import RegistroScreen from '../screens/auth/RegistroScreen';
+import BusquedaScreen from '../screens/auth/BusquedaScreen';
+import ReseñasScreen from '../screens/consumer/ReseñasScreen';
+import TrazabilidadScreen from '../screens/consumer/TrazabilidadScreen';
+import NotificacionesScreen from '../screens/producer/NotificacionesScreen';
 
 // ============================================
 // SCREENS - PRODUCTOR
@@ -56,8 +62,7 @@ const Tab = createBottomTabNavigator();
 // TAB NAVIGATOR - PRODUCTOR
 // ============================================
 const ProducerTabs = () => {
-  const { unreadCount } = useNotifications();
-  const { colors, isDarkMode } = useTheme();
+  const { colors } = useTheme();
   const { stats } = usePedidosMonitor(true);
   const pedidosPendientes = stats?.pendientes || 0;
 
@@ -79,36 +84,20 @@ const ProducerTabs = () => {
         tabBarIcon: ({ focused, color }) => {
           let iconName;
           let badgeCount = 0;
-
           switch (route.name) {
-            case 'Home':
-              iconName = focused ? 'home' : 'home-outline';
-              break;
-            case 'Orders':
-              iconName = focused ? 'receipt' : 'receipt-outline';
-              badgeCount = pedidosPendientes;
-              break;
-            case 'Inventario':
-              iconName = focused ? 'cube' : 'cube-outline';
-              break;
-            case 'Devices':
-              iconName = focused ? 'hardware-chip' : 'hardware-chip-outline';
-              break;
-            case 'Profile':
-              iconName = focused ? 'person' : 'person-outline';
-              break;
-            default:
-              iconName = 'ellipse';
+            case 'Home': iconName = focused ? 'home' : 'home-outline'; break;
+            case 'Orders': iconName = focused ? 'receipt' : 'receipt-outline'; badgeCount = pedidosPendientes; break;
+            case 'Inventario': iconName = focused ? 'cube' : 'cube-outline'; break;
+            case 'Devices': iconName = focused ? 'hardware-chip' : 'hardware-chip-outline'; break;
+            case 'Profile': iconName = focused ? 'person' : 'person-outline'; break;
+            default: iconName = 'ellipse';
           }
-
           return (
             <View>
               <Ionicons name={iconName} size={24} color={color} />
               {badgeCount > 0 && (
                 <View style={[styles.tabBadge, styles.tabBadgeOrders]}>
-                  <Text style={styles.tabBadgeText}>
-                    {badgeCount > 9 ? '9+' : badgeCount}
-                  </Text>
+                  <Text style={styles.tabBadgeText}>{badgeCount > 9 ? '9+' : badgeCount}</Text>
                 </View>
               )}
             </View>
@@ -130,7 +119,6 @@ const ProducerTabs = () => {
 // ============================================
 const ConsumerTabs = () => {
   const { colors } = useTheme();
-
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -148,27 +136,14 @@ const ConsumerTabs = () => {
         tabBarLabelStyle: styles.tabBarLabel,
         tabBarIcon: ({ focused, color }) => {
           let iconName;
-
           switch (route.name) {
-            case 'Inicio':
-              iconName = focused ? 'home' : 'home-outline';
-              break;
-            case 'Tienda':
-              iconName = focused ? 'storefront' : 'storefront-outline';
-              break;
-            case 'Productores':
-              iconName = focused ? 'people' : 'people-outline';
-              break;
-            case 'Carrito':
-              iconName = focused ? 'cart' : 'cart-outline';
-              break;
-            case 'Perfil':
-              iconName = focused ? 'person' : 'person-outline';
-              break;
-            default:
-              iconName = 'ellipse';
+            case 'Inicio': iconName = focused ? 'home' : 'home-outline'; break;
+            case 'Tienda': iconName = focused ? 'storefront' : 'storefront-outline'; break;
+            case 'Productores': iconName = focused ? 'people' : 'people-outline'; break;
+            case 'Carrito': iconName = focused ? 'cart' : 'cart-outline'; break;
+            case 'Perfil': iconName = focused ? 'person' : 'person-outline'; break;
+            default: iconName = 'ellipse';
           }
-
           return <Ionicons name={iconName} size={24} color={color} />;
         },
       })}
@@ -178,7 +153,6 @@ const ConsumerTabs = () => {
       <Tab.Screen name="Productores" component={ProductoresScreen} options={{ tabBarLabel: 'Productores' }} />
       <Tab.Screen name="Carrito" component={CarritoScreen} options={{ tabBarLabel: 'Carrito' }} />
       <Tab.Screen name="Perfil" component={PerfilScreen} options={{ tabBarLabel: 'Perfil' }} />
-      
     </Tab.Navigator>
   );
 };
@@ -188,7 +162,6 @@ const ConsumerTabs = () => {
 // ============================================
 const RepartidorTabs = () => {
   const { colors } = useTheme();
-
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -206,72 +179,58 @@ const RepartidorTabs = () => {
         tabBarLabelStyle: styles.tabBarLabel,
         tabBarIcon: ({ focused, color }) => {
           let iconName;
-
           switch (route.name) {
-            case 'Entregas':
-              iconName = focused ? 'bicycle' : 'bicycle-outline';
-              break;
-            case 'PerfilRepartidor':
-              iconName = focused ? 'person' : 'person-outline';
-              break;
-            default:
-              iconName = 'ellipse';
+            case 'Entregas': iconName = focused ? 'bicycle' : 'bicycle-outline'; break;
+            case 'PerfilRepartidor': iconName = focused ? 'person' : 'person-outline'; break;
+            default: iconName = 'ellipse';
           }
-
           return <Ionicons name={iconName} size={24} color={color} />;
         },
       })}
     >
-      <Tab.Screen
-        name="Entregas"
-        component={RepartidorScreen}
-        options={{ tabBarLabel: 'Entregas' }}
-      />
-      {/* Puedes agregar más tabs del repartidor aquí, ej: ProfileScreen */}
+      <Tab.Screen name="Entregas" component={RepartidorScreen} options={{ tabBarLabel: 'Entregas' }} />
     </Tab.Navigator>
   );
 };
 
 // ============================================
-// STACK NAVIGATOR - CONSUMIDOR (con pantallas extra)
+// STACK NAVIGATOR - CONSUMIDOR
 // ============================================
-const ConsumerStack = () => {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="ConsumerTabs" component={ConsumerTabs} />
-      <Stack.Screen name="DetalleProductor" component={DetalleProductorScreen} />
-      <Stack.Screen name="MisPedidos" component={MisPedidosScreen} />
-      <Stack.Screen name="Ayuda" component={AyudaScreen} />
-      <Stack.Screen name="TrackingPedido" component={TrackingPedidoScreen} />
-      <Stack.Screen name="PagoQR" component={PagoQRScreen} />
-      <Stack.Screen name="DetalleProducto" component={DetalleProductoScreen} />
-    </Stack.Navigator>
-  );
-};
+const ConsumerStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="ConsumerTabs" component={ConsumerTabs} />
+    <Stack.Screen name="DetalleProductor" component={DetalleProductorScreen} />
+    <Stack.Screen name="MisPedidos" component={MisPedidosScreen} />
+    <Stack.Screen name="Ayuda" component={AyudaScreen} />
+    <Stack.Screen name="TrackingPedido" component={TrackingPedidoScreen} />
+    <Stack.Screen name="PagoQR" component={PagoQRScreen} />
+    <Stack.Screen name="DetalleProducto" component={DetalleProductoScreen} />
+    <Stack.Screen name="Busqueda" component={BusquedaScreen} />
+    <Stack.Screen name="Reseñas" component={ReseñasScreen} />
+    <Stack.Screen name="Trazabilidad" component={TrazabilidadScreen} />
+  </Stack.Navigator>
+);
 
 // ============================================
-// STACK NAVIGATOR - PRODUCTOR (con pantallas extra)
+// STACK NAVIGATOR - PRODUCTOR
 // ============================================
-const ProducerStack = () => {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="ProducerTabs" component={ProducerTabs} />
-      <Stack.Screen name="Monitoring" component={MonitoringScreen} />
-    </Stack.Navigator>
-  );
-};
+const ProducerStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="ProducerTabs" component={ProducerTabs} />
+    <Stack.Screen name="Monitoring" component={MonitoringScreen} />
+    <Stack.Screen name="Notificaciones" component={NotificacionesScreen} />
+  </Stack.Navigator>
+);
 
 // ============================================
-// STACK NAVIGATOR - REPARTIDOR (con pantallas extra)
+// STACK NAVIGATOR - REPARTIDOR
 // ============================================
-const RepartidorStack = () => {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="RepartidorTabs" component={RepartidorTabs} />
-      <Stack.Screen name="TrackingPedido" component={TrackingPedidoScreen} />
-    </Stack.Navigator>
-  );
-};
+const RepartidorStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="RepartidorTabs" component={RepartidorTabs} />
+    <Stack.Screen name="TrackingPedido" component={TrackingPedidoScreen} />
+  </Stack.Navigator>
+);
 
 // ============================================
 // APP NAVIGATOR PRINCIPAL
@@ -280,10 +239,8 @@ const AppNavigator = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const { colors, isDarkMode } = useTheme();
 
-  // Determinar el rol del usuario
   const userRole = user?.rol || user?.role || 'consumidor';
 
-  // Tema de navegación personalizado
   const navigationTheme = {
     dark: isDarkMode,
     colors: {
@@ -295,8 +252,6 @@ const AppNavigator = () => {
       notification: colors.error,
     },
   };
-
-  console.log('📱 Navigator - isLoading:', isLoading, 'isAuthenticated:', isAuthenticated, 'role:', userRole);
 
   if (isLoading) {
     return <LoadingScreen message="Verificando sesión..." />;
@@ -311,11 +266,14 @@ const AppNavigator = () => {
           ) : userRole === 'repartidor' ? (
             <Stack.Screen name="RepartidorApp" component={RepartidorStack} />
           ) : (
-            // consumidor + admin + cualquier otro rol
             <Stack.Screen name="ConsumerApp" component={ConsumerStack} />
           )
         ) : (
-          <Stack.Screen name="Login" component={LoginScreen} />
+          <>
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Registro" component={RegistroScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>
@@ -323,10 +281,7 @@ const AppNavigator = () => {
 };
 
 const styles = StyleSheet.create({
-  tabBarLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-  },
+  tabBarLabel: { fontSize: 10, fontWeight: '500' },
   tabBadge: {
     position: 'absolute',
     top: -4,
@@ -339,14 +294,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 4,
   },
-  tabBadgeOrders: {
-    backgroundColor: '#f59e0b',
-  },
-  tabBadgeText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: 'bold',
-  },
+  tabBadgeOrders: { backgroundColor: '#f59e0b' },
+  tabBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
 });
 
 export default AppNavigator;

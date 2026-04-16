@@ -54,17 +54,24 @@ export const orderService = {
   },
 
   // ============================================
-  // MARCAR COMO EN PREPARACIÓN
+  // MARCAR COMO PREPARANDO
   // ============================================
-  marcarEnPreparacion: async (pedidoId) => {
-    return orderService.cambiarEstado(pedidoId, 'en preparación');
+  marcarPreparando: async (pedidoId) => {
+    return orderService.cambiarEstado(pedidoId, 'preparando');
+  },
+
+  // ============================================
+  // MARCAR COMO LISTO PARA RECOGER
+  // ============================================
+  marcarListoParaRecoger: async (pedidoId) => {
+    return orderService.cambiarEstado(pedidoId, 'listo_para_recoger');
   },
 
   // ============================================
   // MARCAR COMO EN CAMINO
   // ============================================
   marcarEnCamino: async (pedidoId) => {
-    return orderService.cambiarEstado(pedidoId, 'en camino');
+    return orderService.cambiarEstado(pedidoId, 'en_camino');
   },
 
   // ============================================

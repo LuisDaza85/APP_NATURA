@@ -37,6 +37,10 @@ const DetalleProductoScreen = ({ navigation, route }) => {
     }
   };
 
+  const handleVerTrazabilidad = () => {
+    navigation.navigate('Trazabilidad', { productoId: producto.id });
+  };
+
   const handleAgregarCarrito = async () => {
     setAgregando(true);
     try {
@@ -55,6 +59,23 @@ const DetalleProductoScreen = ({ navigation, route }) => {
       setAgregando(false);
     }
   };
+
+  const renderTrazabilidadBanner = () => (
+    <TouchableOpacity
+      onPress={handleVerTrazabilidad}
+      style={styles.trazabilidadBanner}
+      activeOpacity={0.85}
+    >
+      <View style={styles.trazabilidadLeft}>
+        <Ionicons name="qr-code-outline" size={22} color="#7c3aed" />
+        <View>
+          <Text style={styles.trazabilidadTitle}>Trazabilidad verificada</Text>
+          <Text style={styles.trazabilidadSub}>Ver origen, crianza y parámetros del agua</Text>
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="#7c3aed" />
+    </TouchableOpacity>
+  );
 
   if (loading) {
     return (
@@ -264,5 +285,13 @@ const styles = StyleSheet.create({
   },
   addToCartText: { color: '#fff', fontSize: 17, fontWeight: '700' },
 });
+
+// Agregar estos estilos al StyleSheet existente:
+// trazabilidadBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+//   backgroundColor: '#f5f3ff', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 12,
+//   padding: 14, marginHorizontal: 16, marginVertical: 8 },
+// trazabilidadLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+// trazabilidadTitle: { fontSize: 13, fontWeight: '600', color: '#5b21b6' },
+// trazabilidadSub: { fontSize: 11, color: '#7c3aed', marginTop: 1 },
 
 export default DetalleProductoScreen;
